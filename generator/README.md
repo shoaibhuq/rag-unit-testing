@@ -10,6 +10,8 @@ pip install -r requirements.txt
 source ./venv/bin/activate
 ```
 
+3. Copy `.env.example` and rename the new file to `.env`. Add respective env variables.
+
 3. Run
 ```bash
 python main.py
