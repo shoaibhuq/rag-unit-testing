@@ -1,6 +1,7 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
+import { VectorDBManager } from "./vectordb";
 
 // Function to generate unit test code
 function generateUnitTestCode(
@@ -43,6 +44,14 @@ export function activate(context: vscode.ExtensionContext) {
     'Congratulations, your extension "rag-unit-testing" is now active!'
   );
 
+  // Create an instance of VectorDBManager
+  const vectorDBManager = new VectorDBManager();
+
+  // Initialize the VectorDBManager
+  vectorDBManager.initialize().catch((error) => {
+    console.error("Failed to initialize Vector DB:", error);
+  });
+
   // The command has been defined in the package.json file
   // Now provide the implementation of the command with registerCommand
   // The commandId parameter must match the command field in package.json
@@ -54,6 +63,35 @@ export function activate(context: vscode.ExtensionContext) {
       vscode.window.showInformationMessage(
         "Hello World from rag-unit-testing!"
       );
+    }
+  );
+
+  // Register command to print vector embeddings for a function by name
+  const printVectorsDisposable = vscode.commands.registerCommand(
+    "rag-unit-testing.printVectorEmbeddings",
+    async () => {
+      try {
+        // Ask the user for a function name
+        const functionName = await vscode.window.showInputBox({
+          prompt: "Enter function name to print vector embeddings",
+          placeHolder: "e.g. add",
+        });
+
+        if (!functionName) {
+          return; // User canceled
+        }
+
+        // Print vectors to the console
+        await vectorDBManager.printVectorEmbeddingsForFunctions(functionName);
+        vscode.window.showInformationMessage(
+          `Vector embeddings for "${functionName}" printed to Debug Console. Press Ctrl+Shift+Y to view.`
+        );
+      } catch (error) {
+        console.error("Error printing vector embeddings:", error);
+        vscode.window.showErrorMessage(
+          `Failed to print vector embeddings: ${error}`
+        );
+      }
     }
   );
 
@@ -72,6 +110,10 @@ export function activate(context: vscode.ExtensionContext) {
         // Get the document content
         const document = editor.document;
         const text = document.getText();
+        const filePath = document.fileName;
+
+        // Store the file context in Weaviate
+        await vectorDBManager.storeFileContext(filePath, text);
 
         // Extract function name (simple implementation - can be enhanced)
         const functionMatch = text.match(/^\s*(\w+)\s+(\w+)\s*\(/m);
@@ -83,7 +125,13 @@ export function activate(context: vscode.ExtensionContext) {
         const functionName = functionMatch[2];
         const testFileName = `test_${functionName}.c`;
 
-        // Generate test code
+        // Get similar functions from Weaviate for context
+        const similarFunctions = await vectorDBManager.searchSimilarFunctions(
+          functionName
+        );
+        console.log("Found similar functions:", similarFunctions);
+
+        // Generate test code (we could use the similar functions to enhance the generated test)
         const testCode = generateUnitTestCode(functionName, []);
 
         // Create and open the test file
@@ -106,7 +154,11 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  context.subscriptions.push(helloWorldDisposable, generateUnitTestDisposable);
+  context.subscriptions.push(
+    helloWorldDisposable,
+    printVectorsDisposable,
+    generateUnitTestDisposable
+  );
 }
 
 // This method is called when your extension is deactivated
