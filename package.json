@@ -16,8 +16,21 @@
       {
         "command": "rag-unit-testing.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "rag-unit-testing.generateUnitTest",
+        "title": "Generate C Unit Test"
       }
-    ]
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "rag-unit-testing.generateUnitTest",
+          "when": "resourceLangId == c",
+          "group": "navigation"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
