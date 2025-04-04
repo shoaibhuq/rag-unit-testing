@@ -9,21 +9,26 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:rag-unit-testing.generateUnitTest",
+    "onCommand:rag-unit-testing.printVectorEmbeddings",
+    "onCommand:rag-unit-testing.configure",
+    "onLanguage:c"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "rag-unit-testing.helloWorld",
-        "title": "Hello World"
-      },
-      {
         "command": "rag-unit-testing.generateUnitTest",
-        "title": "Generate C Unit Test"
+        "title": "Generate C Unit Test - RAG Unit Testing"
       },
       {
         "command": "rag-unit-testing.printVectorEmbeddings",
         "title": "Debug: Print Vector Embeddings"
+      },
+      {
+        "command": "rag-unit-testing.configure",
+        "title": "Configure RAG Unit Testing API Keys"
       }
     ],
     "menus": {
@@ -33,7 +38,44 @@
           "when": "resourceLangId == c",
           "group": "navigation"
         }
+      ],
+      "editor/context": [
+        {
+          "command": "rag-unit-testing.generateUnitTest",
+          "when": "resourceLangId == c",
+          "group": "1_modification"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "rag-unit-testing.generateUnitTest",
+          "when": "resourceLangId == c",
+          "group": "navigation"
+        }
       ]
+    },
+    "configuration": {
+      "title": "RAG Unit Testing",
+      "properties": {
+        "rag-unit-testing.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI API Key for text vectorization and LLM generation"
+        },
+        "rag-unit-testing.disableVectorDB": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disable vector database functionality and operate in LLM-only mode"
+        },
+        "rag-unit-testing.vectorDBType": {
+          "type": "string",
+          "enum": [
+            "simple"
+          ],
+          "default": "simple",
+          "description": "Vector database implementation (using Simple in-memory storage)"
+        }
+      }
     }
   },
   "scripts": {
@@ -49,22 +91,25 @@
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
-    "@types/node": "20.x",
+    "@types/node": "^20.17.30",
     "@types/vscode": "^1.98.0",
     "@typescript-eslint/eslint-plugin": "^8.28.0",
     "@typescript-eslint/parser": "^8.28.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
     "eslint": "^9.23.0",
+    "ignore-loader": "^0.1.2",
     "ts-loader": "^9.5.2",
     "typescript": "^5.8.2",
     "webpack": "^5.98.0",
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {
-    "dotenv": "^16.3.1",
-    "openai": "^4.19.0",
-    "weaviate-client": "^3.4.2",
-    "weaviate-ts-client": "^1.5.0"
+    "@langchain/core": "^0.3.43",
+    "@langchain/langgraph": "^0.2.62",
+    "@langchain/openai": "^0.5.2",
+    "dotenv": "^16.4.7",
+    "node-fetch": "^2.6.7",
+    "openai": "^4.91.1"
   }
 }
