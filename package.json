@@ -74,6 +74,26 @@
           ],
           "default": "simple",
           "description": "Vector database implementation (using Simple in-memory storage)"
+        },
+        "rag-unit-testing.enableLangSmith": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable LangSmith tracing for monitoring LLM interactions"
+        },
+        "rag-unit-testing.langsmithApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "LangSmith API Key for tracking LLM interactions"
+        },
+        "rag-unit-testing.langsmithProject": {
+          "type": "string",
+          "default": "rag-unit-testing",
+          "description": "LangSmith project name for organizing traces"
+        },
+        "rag-unit-testing.langsmithEndpoint": {
+          "type": "string",
+          "default": "https://api.smith.langchain.com",
+          "description": "LangSmith API endpoint URL"
         }
       }
     }
@@ -97,6 +117,7 @@
     "@typescript-eslint/parser": "^8.28.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
+    "copy-webpack-plugin": "^13.0.0",
     "eslint": "^9.23.0",
     "ignore-loader": "^0.1.2",
     "ts-loader": "^9.5.2",
@@ -109,7 +130,10 @@
     "@langchain/langgraph": "^0.2.62",
     "@langchain/openai": "^0.5.2",
     "dotenv": "^16.4.7",
+    "langchain": "^0.3.20",
+    "langsmith": "^0.3.15",
     "node-fetch": "^2.6.7",
-    "openai": "^4.91.1"
+    "openai": "^4.91.1",
+    "web-tree-sitter": "^0.25.3"
   }
 }

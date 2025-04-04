@@ -29,6 +29,7 @@ interface FunctionData {
   id?: string;
   distance?: number;
   embedding?: number[];
+  lastUpdated?: number; // Timestamp for cache control
 }
 
 // Interface for parsed function data
@@ -38,6 +39,19 @@ interface ParsedFunction {
   parameters: string[];
   returnType: string;
 }
+
+// Interface for the embedding cache
+interface EmbeddingCache {
+  [key: string]: {
+    embedding: number[];
+    timestamp: number;
+    expiresAt: number;
+  };
+}
+
+// Cache configuration
+const CACHE_TTL = 1000 * 60 * 60 * 24 * 7; // 1 week in milliseconds
+const BATCH_SIZE = 10; // Maximum batch size for embedding generation
 
 /**
  * Parses C functions from file content using regular expressions.
@@ -125,6 +139,14 @@ export class SimpleVectorManager {
   private isInitialized: boolean = false;
   private functionStore: FunctionData[] = [];
   private cacheDir: string;
+  private embeddingCache: EmbeddingCache = {}; // In-memory cache
+  private pendingEmbeddings: Map<string, Promise<number[]>> = new Map(); // To prevent duplicate requests
+  private batchQueue: {
+    text: string;
+    resolve: (embedding: number[]) => void;
+    reject: (error: Error) => void;
+  }[] = [];
+  private batchTimer: NodeJS.Timeout | null = null;
 
   constructor() {
     // Try to get credentials from VS Code settings first
@@ -181,6 +203,9 @@ export class SimpleVectorManager {
     if (!fs.existsSync(this.cacheDir)) {
       fs.mkdirSync(this.cacheDir, { recursive: true });
     }
+
+    // Load embedding cache from disk
+    this.loadEmbeddingCache();
   }
 
   /**
@@ -232,22 +257,171 @@ export class SimpleVectorManager {
   }
 
   /**
-   * Generate an embedding for a text using OpenAI's API
+   * Load embedding cache from disk
+   */
+  private loadEmbeddingCache(): void {
+    try {
+      const cacheFile = path.join(this.cacheDir, "embedding-cache.json");
+      if (fs.existsSync(cacheFile)) {
+        const data = fs.readFileSync(cacheFile, "utf8");
+        this.embeddingCache = JSON.parse(data);
+
+        // Clean expired cache entries
+        const now = Date.now();
+        let expiredCount = 0;
+
+        Object.keys(this.embeddingCache).forEach((key) => {
+          if (this.embeddingCache[key].expiresAt < now) {
+            delete this.embeddingCache[key];
+            expiredCount++;
+          }
+        });
+
+        console.log(
+          `Loaded embedding cache with ${
+            Object.keys(this.embeddingCache).length
+          } entries (removed ${expiredCount} expired entries)`
+        );
+      } else {
+        console.log("No embedding cache file found, starting with empty cache");
+        this.embeddingCache = {};
+      }
+    } catch (error) {
+      console.warn("Error loading embedding cache:", error);
+      this.embeddingCache = {};
+    }
+  }
+
+  /**
+   * Save embedding cache to disk
+   */
+  private saveEmbeddingCache(): void {
+    try {
+      const cacheFile = path.join(this.cacheDir, "embedding-cache.json");
+      fs.writeFileSync(cacheFile, JSON.stringify(this.embeddingCache), "utf8");
+      console.log(
+        `Saved embedding cache with ${
+          Object.keys(this.embeddingCache).length
+        } entries`
+      );
+    } catch (error) {
+      console.warn("Error saving embedding cache:", error);
+    }
+  }
+
+  /**
+   * Generate an embedding for a text using OpenAI's API with batching and caching
    * @param text The text to embed
    * @returns Promise with the embedding vector
    */
   private async generateEmbedding(text: string): Promise<number[]> {
+    // Create a hash of the text to use as a cache key
+    const textHash = createHash("sha256").update(text).digest("hex");
+
+    // Check if this embedding is already being processed
+    if (this.pendingEmbeddings.has(textHash)) {
+      console.log("Reusing in-flight embedding request");
+      return this.pendingEmbeddings.get(textHash)!;
+    }
+
+    // Check if we have this in cache
+    if (
+      this.embeddingCache[textHash] &&
+      this.embeddingCache[textHash].expiresAt > Date.now()
+    ) {
+      console.log("Using cached embedding");
+      return this.embeddingCache[textHash].embedding;
+    }
+
+    // Create a promise that will be resolved with the embedding
+    const embeddingPromise = new Promise<number[]>((resolve, reject) => {
+      // Add to batch queue
+      this.batchQueue.push({
+        text,
+        resolve,
+        reject,
+      });
+
+      // Set a timer to process the batch if it's not already set
+      if (!this.batchTimer) {
+        this.batchTimer = setTimeout(() => this.processBatch(), 100);
+      }
+    });
+
+    // Store the promise so we can reuse it if the same text is requested
+    this.pendingEmbeddings.set(textHash, embeddingPromise);
+
+    // Once the promise is resolved or rejected, remove it from the pending map
+    embeddingPromise.finally(() => {
+      this.pendingEmbeddings.delete(textHash);
+    });
+
+    return embeddingPromise;
+  }
+
+  /**
+   * Process the batch of embedding requests
+   */
+  private async processBatch(): Promise<void> {
+    this.batchTimer = null;
+
+    // If no requests in queue, do nothing
+    if (this.batchQueue.length === 0) return;
+
+    // Take items from the queue up to the batch size limit
+    const batch = this.batchQueue.splice(0, BATCH_SIZE);
+    const texts = batch.map((item) => item.text);
+
+    console.log(`Processing batch of ${batch.length} embedding requests`);
+
     try {
+      // Make a single API call for all texts in the batch
       const response = await this.openai.embeddings.create({
         model: "text-embedding-3-small",
-        input: text,
+        input: texts,
         dimensions: 1536,
       });
 
-      return response.data[0].embedding;
+      // Match results with original requests and update cache
+      response.data.forEach((result, index) => {
+        const item = batch[index];
+        const textHash = createHash("sha256").update(item.text).digest("hex");
+
+        // Update cache
+        this.embeddingCache[textHash] = {
+          embedding: result.embedding,
+          timestamp: Date.now(),
+          expiresAt: Date.now() + CACHE_TTL,
+        };
+
+        // Resolve the promise with the embedding
+        item.resolve(result.embedding);
+      });
+
+      // Save the updated cache periodically (we don't want to save after every batch)
+      if (Math.random() < 0.1) {
+        // 10% chance of saving
+        this.saveEmbeddingCache();
+      }
+
+      // Process any remaining items in the queue
+      if (this.batchQueue.length > 0) {
+        this.batchTimer = setTimeout(() => this.processBatch(), 100);
+      }
     } catch (error: any) {
-      console.error("Error generating embedding:", error);
-      throw new Error(`Failed to generate embedding: ${error.message}`);
+      console.error("Error generating embeddings batch:", error);
+
+      // Reject all promises in the batch
+      batch.forEach((item) => {
+        item.reject(
+          new Error(`Failed to generate embedding: ${error.message}`)
+        );
+      });
+
+      // Process any remaining items after a delay
+      if (this.batchQueue.length > 0) {
+        this.batchTimer = setTimeout(() => this.processBatch(), 1000); // Longer delay after error
+      }
     }
   }
 
@@ -311,6 +485,9 @@ export class SimpleVectorManager {
         (f) => f.filePath !== filePath
       );
 
+      // Process functions in batches to avoid overwhelming the API
+      const embedPromises: Promise<void>[] = [];
+
       // Process each function
       for (const func of functions) {
         // Generate a consistent ID based on file path and function name
@@ -320,20 +497,29 @@ export class SimpleVectorManager {
 
         console.log(` - Processing ${func.functionName}`);
 
-        // Generate an embedding for the function
-        const embedding = await this.generateEmbedding(func.content);
+        // Create a promise for this function's embedding
+        const embedPromise = (async () => {
+          // Generate an embedding for the function
+          const embedding = await this.generateEmbedding(func.content);
 
-        // Add to store
-        this.functionStore.push({
-          id,
-          functionName: func.functionName,
-          content: func.content,
-          parameters: func.parameters,
-          returnType: func.returnType,
-          filePath,
-          embedding,
-        });
+          // Add to store
+          this.functionStore.push({
+            id,
+            functionName: func.functionName,
+            content: func.content,
+            parameters: func.parameters,
+            returnType: func.returnType,
+            filePath,
+            embedding,
+            lastUpdated: Date.now(),
+          });
+        })();
+
+        embedPromises.push(embedPromise);
       }
+
+      // Wait for all embedding operations to complete
+      await Promise.all(embedPromises);
 
       // Save to cache
       await this.saveCache();
@@ -455,6 +641,13 @@ export class SimpleVectorManager {
         console.log(`\n=== Function: ${func.functionName} ===`);
         console.log(`ID: ${func.id}`);
         console.log(`File Path: ${func.filePath || "N/A"}`);
+        console.log(
+          `Last Updated: ${
+            func.lastUpdated
+              ? new Date(func.lastUpdated).toLocaleString()
+              : "Unknown"
+          }`
+        );
 
         if (func.embedding && func.embedding.length > 0) {
           console.log(`Vector Dimensions: ${func.embedding.length}`);
@@ -476,5 +669,22 @@ export class SimpleVectorManager {
         `Failed to fetch vectors: ${error.message}`
       );
     }
+  }
+
+  /**
+   * Clean up resources when deactivating the extension
+   */
+  public dispose(): void {
+    // Save caches
+    this.saveCache();
+    this.saveEmbeddingCache();
+
+    // Clear any pending timers
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+
+    console.log("SimpleVectorManager disposed");
   }
 }
