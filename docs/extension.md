@@ -16,6 +16,7 @@ export function activate(context: vscode.ExtensionContext) { ... }
 - Sets up the vector manager and C parser
 - Registers all extension commands
 - Creates and compiles the LangGraph workflow
+- Configures LangSmith tracing if enabled
 
 ### LangGraph Workflow
 
@@ -26,6 +27,7 @@ The extension uses LangGraph to orchestrate the test generation process:
    - `retrieveContext`: Fetches similar functions from the vector database
    - `generateTests`: Uses OpenAI to generate test code based on the function and context
 3. **Graph Construction**: The workflow defines a directional graph connecting these nodes
+4. **LangSmith Integration**: Adds tracing capabilities to all LLM interactions
 
 ### Command Registration
 
@@ -78,10 +80,39 @@ The extension uses the `CParser` to extract functions from C files:
 - Attempts to use it for function extraction
 - Falls back to regex parsing if needed
 
+## LangSmith Integration
+
+The extension supports LangSmith tracing for monitoring LLM interactions:
+
+```typescript
+// Initialize LangSmith tracing
+const tracer = new LangChainTracer({
+  projectName: process.env.LANGSMITH_PROJECT || "rag-unit-testing",
+  client: new Client({
+    apiKey: process.env.LANGSMITH_API_KEY,
+    apiUrl: process.env.LANGSMITH_ENDPOINT || "https://api.smith.langchain.com",
+  }),
+});
+```
+
+Key features of the LangSmith integration:
+
+1. **Automatic Tracing**: Records all LLM calls and their responses
+2. **Workflow Visualization**: Provides a visual representation of the LangGraph workflow
+3. **Performance Metrics**: Monitors token usage, latency, and other metrics
+4. **Project Organization**: Groups traces by project for easier analysis
+
+LangSmith tracing is only enabled if the appropriate environment variables are set.
+
 ## Configuration Management
 
-The extension reads configuration from VS Code settings:
+The extension reads configuration from various sources:
 
-- OpenAI API key for LLM generation
-- Vector DB toggle for enabling/disabling RAG features
-- Other configuration options
+- **VS Code Settings**:
+
+  - OpenAI API key for LLM generation
+  - Vector DB toggle for enabling/disabling RAG features
+
+- **Environment Variables**:
+  - OpenAI API key as fallback
+  - LangSmith configuration variables

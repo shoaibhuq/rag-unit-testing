@@ -21,6 +21,10 @@ import {
 } from "@langchain/langgraph"; // Import START constant explicitly
 import { RunnableLambda } from "@langchain/core/runnables";
 
+// Add LangSmith imports
+import { Client } from "langsmith";
+import { LangChainTracer } from "langchain/callbacks";
+
 // --- LangGraph Setup ---
 
 // Define the state interface for the graph
@@ -129,6 +133,22 @@ async function generateTests(state: GraphState): Promise<Partial<GraphState>> {
       temperature: 0.3,
       apiKey: openaiApiKey,
     });
+
+    // Enable LangSmith tracing for the LLM if configured
+    if (langsmithTracingEnabled && process.env.LANGSMITH_API_KEY) {
+      console.log("Adding LangSmith tracing to LLM");
+      const tracer = new LangChainTracer({
+        projectName: process.env.LANGSMITH_PROJECT || "rag-unit-testing",
+        client: new Client({
+          apiKey: process.env.LANGSMITH_API_KEY,
+          apiUrl:
+            process.env.LANGSMITH_ENDPOINT || "https://api.smith.langchain.com",
+        }),
+      });
+
+      // Add tracer to LLM callbacks
+      llm.callbacks = [tracer];
+    }
 
     console.log(
       `[${new Date().toISOString()}] LLM initialized, preparing prompt template`
@@ -295,6 +315,8 @@ async function findRelatedCFiles(
 
 // Keep track of the vector manager instance
 let vectorManagerInstance: SimpleVectorManager | null = null;
+// Track if LangSmith tracing is enabled
+let langsmithTracingEnabled = false;
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('Congratulations, extension "rag-unit-testing" is now active!');
@@ -378,6 +400,55 @@ export function activate(context: vscode.ExtensionContext) {
       console.error("Error initializing C parser:", error);
     });
 
+  // Initialize LangSmith tracing if configured
+  try {
+    // Get configuration
+    const config = vscode.workspace.getConfiguration("rag-unit-testing");
+
+    // Check if LangSmith is enabled in settings
+    const enableLangSmith = config.get("enableLangSmith") === true;
+
+    // Get LangSmith settings - first check VS Code settings, then environment variables
+    const langsmithApiKey =
+      (config.get("langsmithApiKey") as string) ||
+      process.env.LANGSMITH_API_KEY;
+    const langsmithProject =
+      (config.get("langsmithProject") as string) ||
+      process.env.LANGSMITH_PROJECT ||
+      "rag-unit-testing";
+    const langsmithEndpoint =
+      (config.get("langsmithEndpoint") as string) ||
+      process.env.LANGSMITH_ENDPOINT ||
+      "https://api.smith.langchain.com";
+
+    // Check if tracing is enabled either via settings or environment variable
+    langsmithTracingEnabled =
+      enableLangSmith || process.env.LANGSMITH_TRACING === "true";
+
+    if (langsmithApiKey) {
+      console.log(
+        `LangSmith API key found. Using project: ${langsmithProject}`
+      );
+
+      if (langsmithTracingEnabled) {
+        console.log("LangSmith tracing is enabled");
+
+        // Set environment variables for LangSmith - required for LangChain to use them
+        process.env.LANGSMITH_API_KEY = langsmithApiKey;
+        process.env.LANGSMITH_PROJECT = langsmithProject;
+        process.env.LANGSMITH_ENDPOINT = langsmithEndpoint;
+      } else {
+        console.log("LangSmith tracing is disabled");
+      }
+    } else {
+      console.log("LangSmith API key not found, tracing disabled");
+      langsmithTracingEnabled = false;
+    }
+  } catch (error) {
+    console.log("Error initializing LangSmith tracing:", error);
+    langsmithTracingEnabled = false;
+  }
+
   // --- LangGraph Workflow ---
 
   // Define node names as constants
@@ -415,6 +486,14 @@ export function activate(context: vscode.ExtensionContext) {
         default: (): undefined => undefined,
       },
     },
+    // Add LangSmith tracking configuration
+    ...(langsmithTracingEnabled
+      ? {
+          tracingConfig: {
+            projectName: process.env.LANGSMITH_PROJECT || "rag-unit-testing",
+          },
+        }
+      : {}),
   });
 
   // Wrap node functions
@@ -445,6 +524,10 @@ export function activate(context: vscode.ExtensionContext) {
     // Compile the graph
     const app = workflow.compile();
     console.log("LangGraph workflow compiled successfully.");
+
+    if (langsmithTracingEnabled) {
+      console.log("LangGraph workflow will be traced in LangSmith");
+    }
 
     // --- Command Registrations ---
 
@@ -838,7 +921,13 @@ export function activate(context: vscode.ExtensionContext) {
     configureDisposable = vscode.commands.registerCommand(
       "rag-unit-testing.configure",
       async () => {
-        const options = ["Set OpenAI API Key", "Open Settings in Editor"];
+        const options = [
+          "Set OpenAI API Key",
+          "Set LangSmith API Key",
+          "Enable/Disable LangSmith Tracing",
+          "Set LangSmith Project",
+          "Open Settings in Editor",
+        ];
 
         const selectedOption = await vscode.window.showQuickPick(options, {
           placeHolder: "Select a configuration option",
@@ -877,6 +966,78 @@ export function activate(context: vscode.ExtensionContext) {
             );
             vscode.window.showInformationMessage(
               "OpenAI API Key has been updated"
+            );
+          }
+        }
+
+        if (selectedOption === "Set LangSmith API Key") {
+          const prompt = "Enter your LangSmith API Key";
+          const placeholder = "lsv2_...";
+          const password = true;
+
+          const value = await vscode.window.showInputBox({
+            prompt,
+            placeHolder: placeholder,
+            password,
+          });
+
+          if (value !== undefined) {
+            await config.update(
+              "langsmithApiKey",
+              value,
+              vscode.ConfigurationTarget.Global
+            );
+            vscode.window.showInformationMessage(
+              "LangSmith API Key has been updated"
+            );
+          }
+        }
+
+        if (selectedOption === "Enable/Disable LangSmith Tracing") {
+          const currentValue = config.get("enableLangSmith") === true;
+          const options = [
+            { label: "Enable", picked: currentValue },
+            { label: "Disable", picked: !currentValue },
+          ];
+
+          const selection = await vscode.window.showQuickPick(options, {
+            placeHolder: "Enable or disable LangSmith tracing",
+            canPickMany: false,
+          });
+
+          if (selection) {
+            const newValue = selection.label === "Enable";
+            await config.update(
+              "enableLangSmith",
+              newValue,
+              vscode.ConfigurationTarget.Global
+            );
+            vscode.window.showInformationMessage(
+              `LangSmith tracing has been ${newValue ? "enabled" : "disabled"}`
+            );
+          }
+        }
+
+        if (selectedOption === "Set LangSmith Project") {
+          const currentValue =
+            (config.get("langsmithProject") as string) || "rag-unit-testing";
+          const prompt = "Enter your LangSmith project name";
+          const placeholder = currentValue;
+
+          const value = await vscode.window.showInputBox({
+            prompt,
+            placeHolder: placeholder,
+            value: currentValue,
+          });
+
+          if (value !== undefined) {
+            await config.update(
+              "langsmithProject",
+              value,
+              vscode.ConfigurationTarget.Global
+            );
+            vscode.window.showInformationMessage(
+              "LangSmith project has been updated"
             );
           }
         }

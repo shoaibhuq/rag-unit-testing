@@ -7,6 +7,7 @@ The RAG Unit Testing extension is a VS Code tool designed to automatically gener
 1. **LLMs (Large Language Models)** - Powered by OpenAI's GPT models to generate relevant test code
 2. **RAG (Retrieval Augmented Generation)** - Provides context from similar functions to improve test quality
 3. **Efficient Vector Embedding** - Stores and retrieves function context using semantic similarity
+4. **LangSmith Integration** - Provides tracing and monitoring for LLM interactions
 
 This documentation explains the architecture, components, and workflow of the extension.
 
@@ -38,6 +39,7 @@ The extension follows this workflow when generating unit tests:
 - **Multiple Parsing Strategies**: Handles different C function styles and formats
 - **Fallback Mechanisms**: Gracefully handles errors in parsing or vector DB connectivity
 - **User Configuration**: VS Code settings for API keys and feature toggling
+- **LangSmith Tracing**: Monitors LLM calls with detailed metrics and debugging tools
 
 ## Component Documentation
 

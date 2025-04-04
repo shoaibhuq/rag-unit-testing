@@ -54,6 +54,9 @@ const output_parsers_1 = __webpack_require__(373);
 const prompts_1 = __webpack_require__(459);
 const langgraph_1 = __webpack_require__(472); // Import START constant explicitly
 const runnables_1 = __webpack_require__(368);
+// Add LangSmith imports
+const langsmith_1 = __webpack_require__(296);
+const callbacks_1 = __webpack_require__(606);
 // Define the graph nodes
 /**
  * Node: Retrieves context (similar functions) from the vector database.
@@ -117,6 +120,19 @@ async function generateTests(state) {
             temperature: 0.3,
             apiKey: openaiApiKey,
         });
+        // Enable LangSmith tracing for the LLM if configured
+        if (langsmithTracingEnabled && process.env.LANGSMITH_API_KEY) {
+            console.log("Adding LangSmith tracing to LLM");
+            const tracer = new callbacks_1.LangChainTracer({
+                projectName: process.env.LANGSMITH_PROJECT || "rag-unit-testing",
+                client: new langsmith_1.Client({
+                    apiKey: process.env.LANGSMITH_API_KEY,
+                    apiUrl: process.env.LANGSMITH_ENDPOINT || "https://api.smith.langchain.com",
+                }),
+            });
+            // Add tracer to LLM callbacks
+            llm.callbacks = [tracer];
+        }
         console.log(`[${new Date().toISOString()}] LLM initialized, preparing prompt template`);
         const testGenPrompt = prompts_1.PromptTemplate.fromTemplate(`You are an expert C programmer specializing in unit testing with the Unity framework.
     Your task is to generate comprehensive unit tests for the given C function.
@@ -240,6 +256,8 @@ async function findRelatedCFiles(baseFilePath) {
 // --- VS Code Extension Activation ---
 // Keep track of the vector manager instance
 let vectorManagerInstance = null;
+// Track if LangSmith tracing is enabled
+let langsmithTracingEnabled = false;
 function activate(context) {
     console.log('Congratulations, extension "rag-unit-testing" is now active!');
     // --- Initialization ---
@@ -304,6 +322,46 @@ function activate(context) {
         .catch((error) => {
         console.error("Error initializing C parser:", error);
     });
+    // Initialize LangSmith tracing if configured
+    try {
+        // Get configuration
+        const config = vscode.workspace.getConfiguration("rag-unit-testing");
+        // Check if LangSmith is enabled in settings
+        const enableLangSmith = config.get("enableLangSmith") === true;
+        // Get LangSmith settings - first check VS Code settings, then environment variables
+        const langsmithApiKey = config.get("langsmithApiKey") ||
+            process.env.LANGSMITH_API_KEY;
+        const langsmithProject = config.get("langsmithProject") ||
+            process.env.LANGSMITH_PROJECT ||
+            "rag-unit-testing";
+        const langsmithEndpoint = config.get("langsmithEndpoint") ||
+            process.env.LANGSMITH_ENDPOINT ||
+            "https://api.smith.langchain.com";
+        // Check if tracing is enabled either via settings or environment variable
+        langsmithTracingEnabled =
+            enableLangSmith || process.env.LANGSMITH_TRACING === "true";
+        if (langsmithApiKey) {
+            console.log(`LangSmith API key found. Using project: ${langsmithProject}`);
+            if (langsmithTracingEnabled) {
+                console.log("LangSmith tracing is enabled");
+                // Set environment variables for LangSmith - required for LangChain to use them
+                process.env.LANGSMITH_API_KEY = langsmithApiKey;
+                process.env.LANGSMITH_PROJECT = langsmithProject;
+                process.env.LANGSMITH_ENDPOINT = langsmithEndpoint;
+            }
+            else {
+                console.log("LangSmith tracing is disabled");
+            }
+        }
+        else {
+            console.log("LangSmith API key not found, tracing disabled");
+            langsmithTracingEnabled = false;
+        }
+    }
+    catch (error) {
+        console.log("Error initializing LangSmith tracing:", error);
+        langsmithTracingEnabled = false;
+    }
     // --- LangGraph Workflow ---
     // Define node names as constants
     const RETRIEVE_CONTEXT = "retrieveContext";
@@ -336,6 +394,14 @@ function activate(context) {
                 default: () => undefined,
             },
         },
+        // Add LangSmith tracking configuration
+        ...(langsmithTracingEnabled
+            ? {
+                tracingConfig: {
+                    projectName: process.env.LANGSMITH_PROJECT || "rag-unit-testing",
+                },
+            }
+            : {}),
     });
     // Wrap node functions
     const retrieveContextNode = new runnables_1.RunnableLambda({
@@ -358,6 +424,9 @@ function activate(context) {
         // Compile the graph
         const app = workflow.compile();
         console.log("LangGraph workflow compiled successfully.");
+        if (langsmithTracingEnabled) {
+            console.log("LangGraph workflow will be traced in LangSmith");
+        }
         // --- Command Registrations ---
         // Simple Hello World command (example)
         helloWorldDisposable = vscode.commands.registerCommand("rag-unit-testing.helloWorld", () => {
@@ -633,7 +702,13 @@ function activate(context) {
         });
         // Add command to configure API keys
         configureDisposable = vscode.commands.registerCommand("rag-unit-testing.configure", async () => {
-            const options = ["Set OpenAI API Key", "Open Settings in Editor"];
+            const options = [
+                "Set OpenAI API Key",
+                "Set LangSmith API Key",
+                "Enable/Disable LangSmith Tracing",
+                "Set LangSmith Project",
+                "Open Settings in Editor",
+            ];
             const selectedOption = await vscode.window.showQuickPick(options, {
                 placeHolder: "Select a configuration option",
             });
@@ -657,6 +732,50 @@ function activate(context) {
                 if (value !== undefined) {
                     await config.update("openaiApiKey", value, vscode.ConfigurationTarget.Global);
                     vscode.window.showInformationMessage("OpenAI API Key has been updated");
+                }
+            }
+            if (selectedOption === "Set LangSmith API Key") {
+                const prompt = "Enter your LangSmith API Key";
+                const placeholder = "lsv2_...";
+                const password = true;
+                const value = await vscode.window.showInputBox({
+                    prompt,
+                    placeHolder: placeholder,
+                    password,
+                });
+                if (value !== undefined) {
+                    await config.update("langsmithApiKey", value, vscode.ConfigurationTarget.Global);
+                    vscode.window.showInformationMessage("LangSmith API Key has been updated");
+                }
+            }
+            if (selectedOption === "Enable/Disable LangSmith Tracing") {
+                const currentValue = config.get("enableLangSmith") === true;
+                const options = [
+                    { label: "Enable", picked: currentValue },
+                    { label: "Disable", picked: !currentValue },
+                ];
+                const selection = await vscode.window.showQuickPick(options, {
+                    placeHolder: "Enable or disable LangSmith tracing",
+                    canPickMany: false,
+                });
+                if (selection) {
+                    const newValue = selection.label === "Enable";
+                    await config.update("enableLangSmith", newValue, vscode.ConfigurationTarget.Global);
+                    vscode.window.showInformationMessage(`LangSmith tracing has been ${newValue ? "enabled" : "disabled"}`);
+                }
+            }
+            if (selectedOption === "Set LangSmith Project") {
+                const currentValue = config.get("langsmithProject") || "rag-unit-testing";
+                const prompt = "Enter your LangSmith project name";
+                const placeholder = currentValue;
+                const value = await vscode.window.showInputBox({
+                    prompt,
+                    placeHolder: placeholder,
+                    value: currentValue,
+                });
+                if (value !== undefined) {
+                    await config.update("langsmithProject", value, vscode.ConfigurationTarget.Global);
+                    vscode.window.showInformationMessage("LangSmith project has been updated");
                 }
             }
         });
@@ -59159,15 +59278,15 @@ class BasePromptTemplate extends base_js_1.Runnable {
     static async deserialize(data) {
         switch (data._type) {
             case "prompt": {
-                const { PromptTemplate } = await __webpack_require__.e(/* import() */ 1).then(__webpack_require__.bind(__webpack_require__, 606));
+                const { PromptTemplate } = await __webpack_require__.e(/* import() */ 1).then(__webpack_require__.bind(__webpack_require__, 618));
                 return PromptTemplate.deserialize(data);
             }
             case undefined: {
-                const { PromptTemplate } = await __webpack_require__.e(/* import() */ 1).then(__webpack_require__.bind(__webpack_require__, 606));
+                const { PromptTemplate } = await __webpack_require__.e(/* import() */ 1).then(__webpack_require__.bind(__webpack_require__, 618));
                 return PromptTemplate.deserialize({ ...data, _type: "prompt" });
             }
             case "few_shot": {
-                const { FewShotPromptTemplate } = await Promise.all(/* import() */[__webpack_require__.e(1), __webpack_require__.e(2)]).then(__webpack_require__.bind(__webpack_require__, 714));
+                const { FewShotPromptTemplate } = await Promise.all(/* import() */[__webpack_require__.e(1), __webpack_require__.e(2)]).then(__webpack_require__.bind(__webpack_require__, 726));
                 return FewShotPromptTemplate.deserialize(data);
             }
             default:
@@ -77719,6 +77838,183 @@ function interrupt(value) {
 }
 exports.interrupt = interrupt;
 //# sourceMappingURL=interrupt.js.map
+
+/***/ }),
+/* 606 */
+/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
+
+module.exports = __webpack_require__(607);
+
+/***/ }),
+/* 607 */
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.consumeCallback = exports.awaitAllCallbacks = exports.LangChainTracer = exports.RunCollectorCallbackHandler = exports.ConsoleCallbackHandler = exports.BaseTracer = void 0;
+var tracer_js_1 = __webpack_require__(608);
+Object.defineProperty(exports, "BaseTracer", ({ enumerable: true, get: function () { return tracer_js_1.BaseTracer; } }));
+var console_js_1 = __webpack_require__(610);
+Object.defineProperty(exports, "ConsoleCallbackHandler", ({ enumerable: true, get: function () { return console_js_1.ConsoleCallbackHandler; } }));
+var run_collector_js_1 = __webpack_require__(612);
+Object.defineProperty(exports, "RunCollectorCallbackHandler", ({ enumerable: true, get: function () { return run_collector_js_1.RunCollectorCallbackHandler; } }));
+var tracer_langchain_js_1 = __webpack_require__(614);
+Object.defineProperty(exports, "LangChainTracer", ({ enumerable: true, get: function () { return tracer_langchain_js_1.LangChainTracer; } }));
+var promises_js_1 = __webpack_require__(616);
+Object.defineProperty(exports, "awaitAllCallbacks", ({ enumerable: true, get: function () { return promises_js_1.awaitAllCallbacks; } }));
+Object.defineProperty(exports, "consumeCallback", ({ enumerable: true, get: function () { return promises_js_1.consumeCallback; } }));
+
+
+/***/ }),
+/* 608 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+__exportStar(__webpack_require__(609), exports);
+
+
+/***/ }),
+/* 609 */
+/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
+
+module.exports = __webpack_require__(285);
+
+/***/ }),
+/* 610 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+__exportStar(__webpack_require__(611), exports);
+
+
+/***/ }),
+/* 611 */
+/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
+
+module.exports = __webpack_require__(291);
+
+/***/ }),
+/* 612 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+__exportStar(__webpack_require__(613), exports);
+
+
+/***/ }),
+/* 613 */
+/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
+
+module.exports = __webpack_require__(530);
+
+/***/ }),
+/* 614 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+__exportStar(__webpack_require__(615), exports);
+
+
+/***/ }),
+/* 615 */
+/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
+
+module.exports = __webpack_require__(293);
+
+/***/ }),
+/* 616 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+__exportStar(__webpack_require__(617), exports);
+
+
+/***/ }),
+/* 617 */
+/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
+
+module.exports = __webpack_require__(297);
 
 /***/ })
 /******/ 	]);

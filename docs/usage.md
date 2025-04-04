@@ -27,6 +27,46 @@ The extension requires an OpenAI API key to function. You can set this in one of
    - Create a `.env` file in your workspace root
    - Add the line: `OPENAI_API_KEY=your_api_key_here`
 
+### LangSmith Tracing
+
+The extension supports LangSmith tracing to monitor and analyze your LLM interactions. You can enable it in two ways:
+
+#### Method 1: VS Code Settings (Recommended)
+
+1. Open VS Code settings (File > Preferences > Settings)
+2. Search for "RAG Unit Testing"
+3. Enable "Enable LangSmith" setting
+4. Configure the following settings:
+   - **LangSmith API Key**: Your LangSmith API key
+   - **LangSmith Project**: The project name to use (default: "rag-unit-testing")
+   - **LangSmith Endpoint**: The API endpoint (default: "https://api.smith.langchain.com")
+
+#### Method 2: Environment Variables
+
+1. **Install LangSmith Dependencies**:
+
+   ```bash
+   npm install -S langsmith
+   ```
+
+2. **Set Up Environment Variables**:
+   Add the following to your `.env` file:
+
+   ```
+   LANGSMITH_TRACING=true
+   LANGSMITH_ENDPOINT="https://api.smith.langchain.com"
+   LANGSMITH_API_KEY="your_langsmith_api_key"
+   LANGSMITH_PROJECT="your_project_name"
+   ```
+
+#### Viewing Traces
+
+- Go to [LangSmith dashboard](https://smith.langchain.com)
+- Navigate to your project
+- Review function calls, inputs, outputs, and performance metrics
+
+LangSmith tracing helps debug LLM behavior, optimize prompts, and analyze token usage and latency.
+
 ### Additional Settings
 
 You can customize the extension's behavior through these settings:
