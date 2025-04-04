@@ -5,6 +5,7 @@ import * as fs from "fs/promises"; // Use promises for async file operations
 
 // Import local modules
 import { SimpleVectorManager } from "./simple-vector"; // Import our simple vector manager
+import { CParser } from "./c-parser"; // Import our advanced C parser
 
 // Import LangChain and LangGraph components
 import { ChatOpenAI } from "@langchain/openai";
@@ -292,11 +293,15 @@ async function findRelatedCFiles(
 
 // --- VS Code Extension Activation ---
 
+// Keep track of the vector manager instance
+let vectorManagerInstance: SimpleVectorManager | null = null;
+
 export function activate(context: vscode.ExtensionContext) {
   console.log('Congratulations, extension "rag-unit-testing" is now active!');
 
   // --- Initialization ---
   let vectorManager: SimpleVectorManager | null = null; // Initialize as null
+  let cParser: CParser | null = null; // Initialize C parser
   let vectorDBAvailable = false; // Track if vector DB is available
 
   // Define the command handles outside any try/catch blocks
@@ -319,6 +324,7 @@ export function activate(context: vscode.ExtensionContext) {
       // Initialize the simple vector manager
       console.log("Using SimpleVectorManager for vector embeddings");
       vectorManager = new SimpleVectorManager();
+      vectorManagerInstance = vectorManager; // Store for deactivate
 
       // Initialize asynchronously, don't block activation
       vectorManager
@@ -354,6 +360,23 @@ export function activate(context: vscode.ExtensionContext) {
       // vectorManager remains null
     }
   }
+
+  // Initialize C parser - do this in parallel with vector DB initialization
+  cParser = new CParser();
+  cParser
+    .initialize()
+    .then((initialized) => {
+      if (initialized) {
+        console.log("C parser initialized successfully.");
+      } else {
+        console.warn(
+          "C parser initialization failed, will use fallback regex parser."
+        );
+      }
+    })
+    .catch((error) => {
+      console.error("Error initializing C parser:", error);
+    });
 
   // --- LangGraph Workflow ---
 
@@ -572,10 +595,32 @@ export function activate(context: vscode.ExtensionContext) {
           }
 
           // 3. Find the specific code block for the target function
-          const parsedFunctions = parseCFunctions(fileContent);
-          let targetFunction = parsedFunctions.find(
-            (f) => f.functionName === functionName
-          );
+          let targetFunction = null;
+          let parsedFunctions = [];
+
+          // Try using Tree-sitter parser first
+          if (cParser && (await cParser.initialize())) {
+            console.log("Using Tree-sitter parser to find functions");
+            parsedFunctions = cParser.parseFunctions(fileContent, filePath);
+            targetFunction = parsedFunctions.find(
+              (f) => f.functionName === functionName
+            );
+          }
+
+          // Fall back to regex parser if needed
+          if (!targetFunction) {
+            console.log("Falling back to regex parser");
+            if (cParser) {
+              // Use the fallback method from the C parser
+              parsedFunctions = cParser.fallbackParseFunctions(fileContent);
+            } else {
+              // Use the original regex parser as final fallback
+              parsedFunctions = parseCFunctions(fileContent);
+            }
+            targetFunction = parsedFunctions.find(
+              (f) => f.functionName === functionName
+            );
+          }
 
           let functionCode = "";
 
@@ -894,7 +939,16 @@ export function activate(context: vscode.ExtensionContext) {
 // This method is called when your extension is deactivated
 export function deactivate() {
   console.log('Extension "rag-unit-testing" is now deactivated.');
-  // Add cleanup logic here if needed (e.g., close DB connections if applicable)
+
+  // Clean up resources
+  if (vectorManagerInstance) {
+    try {
+      console.log("Disposing vector manager resources...");
+      vectorManagerInstance.dispose();
+    } catch (error) {
+      console.error("Error during cleanup:", error);
+    }
+  }
 }
 
 // Helper function to parse C functions (ensure this is robust or replaced)

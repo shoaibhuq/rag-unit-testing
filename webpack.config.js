@@ -8,7 +8,7 @@ const path = require("path");
 /** @typedef {import('webpack').Configuration} WebpackConfig **/
 
 /** @type WebpackConfig */
-const extensionConfig = {
+const webpackConfig = {
   target: "node", // VS Code extensions run in a Node.js-context 📖 -> https://webpack.js.org/configuration/node/
   mode: "none", // this leaves the source code as close as possible to the original (when packaging we set this to 'production')
 
@@ -18,6 +18,7 @@ const extensionConfig = {
     path: path.resolve(__dirname, "dist"),
     filename: "extension.js",
     libraryTarget: "commonjs2",
+    devtoolModuleFilenameTemplate: "../[resource-path]",
   },
   externals: {
     vscode: "commonjs vscode", // the vscode-module is created on-the-fly and must be excluded. Add other modules that cannot be webpack'ed, 📖 -> https://webpack.js.org/configuration/externals/
@@ -29,6 +30,8 @@ const extensionConfig = {
     "onnxruntime-node": "commonjs onnxruntime-node",
     "@xenova/transformers": "commonjs @xenova/transformers",
     "chromadb-default-embed": "commonjs chromadb-default-embed",
+    // Add binary dependencies as externals
+    "web-tree-sitter": "commonjs web-tree-sitter",
   },
   resolve: {
     // support reading TypeScript and JavaScript files, 📖 -> https://github.com/TypeStrong/ts-loader
@@ -52,7 +55,7 @@ const extensionConfig = {
       },
       {
         // Skip processing binary files with special loader
-        test: /\.(node|exe|dll)$/,
+        test: /\.(wasm|node|exe|dll)$/,
         use: "ignore-loader",
       },
     ],
@@ -62,4 +65,5 @@ const extensionConfig = {
     level: "log", // enables logging required for problem matchers
   },
 };
-module.exports = [extensionConfig];
+
+module.exports = webpackConfig;
