@@ -1,17 +1,16 @@
 {
-    "analyze": {
-      "includedFiles": ["src/**/*.c"],
-      "excludedFiles": ["src/test/**"]
-    },
-    "testGeneration": {
-      "framework": "Unity",
-      "includeMocks": false,
-      "edgeCases": true
-    },
-    "llm": {
-      "model": "gemini",
-      "temperature": 0.2,
-      "summarizeOnly": false
-    }
+  "analyze": {
+    "includedFiles": ["src/**/*.c"],
+    "excludedFiles": ["src/test/**"]
+  },
+  "testGeneration": {
+    "framework": "Unity",
+    "includeMocks": false,
+    "edgeCases": true
+  },
+  "llm": {
+    "model": "gemini",
+    "temperature": 0.2,
+    "summarizeOnly": false
   }
-  
+}
