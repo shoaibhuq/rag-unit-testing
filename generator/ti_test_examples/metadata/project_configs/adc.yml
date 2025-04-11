@@ -1,0 +1,27 @@
+{
+    tools: [ gcc, iar, llvm ],
+    supportedOS: [ tirtos7, freertos, nortos ],
+    boards: [
+        all_cc13xx_cc26xx,
+        all_cc23x0r5, # Do not enable for Loki Low, no overlapping ADC/DAC pins with IOTH
+        all_cc27xx,
+    ],
+
+    fileLists: {
+        all: [
+            # Test source files
+            { path: "[TEST]/src/adc.syscfg", },
+            { path: "[TEST]/src/testcase_adc_general.c" },
+
+            # Top-level drivers
+            { path: "[DRIVERS]/source/ti/drivers/ADC.c", targetDirectory: drivers },
+        ],
+        # Device-specific drivers below
+        all_cc13xx_cc26xx: [
+            { path: "[DRIVERS]/source/ti/drivers/adc/ADCCC26XX.c", targetDirectory: drivers },
+        ],
+        all_lpf3: [
+            { path: "[DRIVERS]/source/ti/drivers/adc/ADCLPF3.c", targetDirectory: drivers},
+        ]
+    },
+}

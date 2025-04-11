@@ -1,0 +1,35 @@
+{
+  "driver": "gpio",
+  "testType": "general",
+  "boardSupport": [
+    "all_lpf3",
+    "all_cc13xx_cc26xx",
+    "all_cc35xx"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "toolchain": [
+    "gcc",
+    "iar",
+    "llvm"
+  ],
+  "dependencies": [
+    "[DRIVERS]/source/ti/drivers/GPIO.c"
+  ],
+  "testFiles": {
+    "c": [
+      "[TEST]/src/testcases.c"
+    ],
+    "h": [],
+    "py": [],
+    "syscfg": []
+  },
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/GPIO.c"
+  ],
+  "created": "2025-04-11T06:26:28.106Z",
+  "updated": "2025-04-11T06:26:28.106Z"
+}

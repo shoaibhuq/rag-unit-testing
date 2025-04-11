@@ -1,0 +1,39 @@
+{
+  "driver": "spi",
+  "testType": "general",
+  "boardSupport": [
+    "all_cc13xx_cc26xx",
+    "all_cc13x4_cc26x4",
+    "all_lpf3",
+    "all_wff3"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "toolchain": [
+    "gcc",
+    "iar",
+    "llvm"
+  ],
+  "dependencies": [
+    "[DRIVERS]/source/ti/drivers/SPI.c"
+  ],
+  "testFiles": {
+    "c": [
+      "[TEST]/src/testcase_spi_general.c",
+      "[TEST]/src/testcase_spi_common.c"
+    ],
+    "h": [],
+    "py": [],
+    "syscfg": [
+      "[TEST]/src/spi.syscfg"
+    ]
+  },
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/SPI.c"
+  ],
+  "created": "2025-04-11T06:26:28.108Z",
+  "updated": "2025-04-11T06:26:28.108Z"
+}

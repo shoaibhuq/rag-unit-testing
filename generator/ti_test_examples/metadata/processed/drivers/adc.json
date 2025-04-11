@@ -1,0 +1,21 @@
+{
+  "name": "adc",
+  "boardSupport": [
+    "all_cc13xx_cc26xx",
+    "all_cc23x0r5",
+    "all_cc27xx"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "testCases": [
+    "adc_general_0"
+  ],
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/ADC.c",
+    "[DRIVERS]/source/ti/drivers/adc/ADCCC26XX.c",
+    "[DRIVERS]/source/ti/drivers/adc/ADCLPF3.c"
+  ]
+}

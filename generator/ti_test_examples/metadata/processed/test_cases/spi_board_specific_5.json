@@ -1,0 +1,33 @@
+{
+  "driver": "spi",
+  "testType": "board_specific",
+  "boardSupport": [
+    "wff3"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "toolchain": [
+    "gcc",
+    "iar",
+    "llvm"
+  ],
+  "dependencies": [
+    "[DRIVERS]/source/ti/drivers/spi/SPIWFF3DMA.c"
+  ],
+  "testFiles": {
+    "c": [
+      "[TEST]/src/testcase_spi.c"
+    ],
+    "h": [],
+    "py": [],
+    "syscfg": []
+  },
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/spi/SPIWFF3DMA.c"
+  ],
+  "created": "2025-04-11T06:26:28.108Z",
+  "updated": "2025-04-11T06:26:28.108Z"
+}

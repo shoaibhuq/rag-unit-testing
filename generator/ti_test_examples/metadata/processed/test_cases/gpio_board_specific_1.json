@@ -1,0 +1,29 @@
+{
+  "driver": "gpio",
+  "testType": "board_specific",
+  "boardSupport": [
+    "cc13xx_cc26xx"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "toolchain": [
+    "gcc",
+    "iar",
+    "llvm"
+  ],
+  "dependencies": [],
+  "testFiles": {
+    "c": [
+      "[TEST]/src/testcases_cc26xx.c"
+    ],
+    "h": [],
+    "py": [],
+    "syscfg": []
+  },
+  "sourceFiles": [],
+  "created": "2025-04-11T06:26:28.106Z",
+  "updated": "2025-04-11T06:26:28.106Z"
+}

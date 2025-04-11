@@ -1,0 +1,33 @@
+{
+  "driver": "spi",
+  "testType": "board_specific",
+  "boardSupport": [
+    "cc13x1_cc26x1"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "toolchain": [
+    "gcc",
+    "iar",
+    "llvm"
+  ],
+  "dependencies": [
+    "[DRIVERS]/source/ti/drivers/spi/SPICC26X2DMA.c"
+  ],
+  "testFiles": {
+    "c": [
+      "[TEST]/src/testcase_spi.c"
+    ],
+    "h": [],
+    "py": [],
+    "syscfg": []
+  },
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/spi/SPICC26X2DMA.c"
+  ],
+  "created": "2025-04-11T06:26:28.108Z",
+  "updated": "2025-04-11T06:26:28.108Z"
+}
