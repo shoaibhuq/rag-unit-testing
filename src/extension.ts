@@ -25,6 +25,15 @@ import { RunnableLambda } from "@langchain/core/runnables";
 import { Client } from "langsmith";
 import { LangChainTracer } from "langchain/callbacks";
 
+// Load configuration settings
+import { loadConfig } from './config';
+
+const config = loadConfig();
+
+// Example usage:
+console.log("LLM Model:", config.llm.model);
+console.log("Included Files:", config.analyze.includedFiles);
+
 // --- LangGraph Setup ---
 
 // Define the state interface for the graph
