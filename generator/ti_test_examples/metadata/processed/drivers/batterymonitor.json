@@ -1,0 +1,21 @@
+{
+  "name": "batterymonitor",
+  "boardSupport": [
+    "all_cc23xx",
+    "all_cc27xx"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "testCases": [
+    "batterymonitor_general_0",
+    "batterymonitor_board_specific_1"
+  ],
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/temperature/TemperatureLPF3.c",
+    "[DRIVERS]/source/ti/drivers/batterymonitor/BatteryMonitorLPF3.c",
+    "[DRIVERS]/source/ti/drivers/batterymonitor/BatMonSupportLPF3.c"
+  ]
+}

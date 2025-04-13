@@ -1,0 +1,23 @@
+{
+  "name": "apps",
+  "boardSupport": [
+    "all_cc13xx_cc26xx",
+    "all_lpf3",
+    "all_wff3"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "testCases": [
+    "apps_general_0"
+  ],
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/GPIO.c",
+    "[DRIVERS]/source/ti/drivers/apps/Button.c",
+    "[DRIVERS]/source/ti/drivers/gpio/GPIOCC26XX.c",
+    "[DRIVERS]/source/ti/drivers/gpio/GPIOLPF3.c",
+    "[DRIVERS]/source/ti/drivers/gpio/GPIOWFF3.c"
+  ]
+}

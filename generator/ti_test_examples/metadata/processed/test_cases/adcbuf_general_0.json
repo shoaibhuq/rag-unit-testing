@@ -1,0 +1,35 @@
+{
+  "driver": "adcbuf",
+  "testType": "general",
+  "boardSupport": [
+    "all_cc23x0r5",
+    "all_cc27xx"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "toolchain": [
+    "gcc",
+    "llvm"
+  ],
+  "dependencies": [
+    "[DRIVERS]/source/ti/drivers/ADCBuf.c"
+  ],
+  "testFiles": {
+    "c": [
+      "[TEST]/src/testcase_adcbuf_general.c"
+    ],
+    "h": [],
+    "py": [],
+    "syscfg": [
+      "[TEST]/src/adcbuf.syscfg"
+    ]
+  },
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/ADCBuf.c"
+  ],
+  "created": "2025-04-11T16:40:25.565Z",
+  "updated": "2025-04-11T16:40:25.565Z"
+}

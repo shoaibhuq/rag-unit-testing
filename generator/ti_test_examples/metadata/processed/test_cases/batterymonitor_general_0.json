@@ -1,0 +1,32 @@
+{
+  "driver": "batterymonitor",
+  "testType": "general",
+  "boardSupport": [
+    "all_cc23xx",
+    "all_cc27xx"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "toolchain": [
+    "gcc",
+    "iar",
+    "llvm"
+  ],
+  "dependencies": [],
+  "testFiles": {
+    "c": [
+      "[TEST]/src/testcase_batterymonitor.c"
+    ],
+    "h": [],
+    "py": [],
+    "syscfg": [
+      "[TEST]/src/batterymonitor.syscfg"
+    ]
+  },
+  "sourceFiles": [],
+  "created": "2025-04-11T16:40:25.569Z",
+  "updated": "2025-04-11T16:40:25.569Z"
+}

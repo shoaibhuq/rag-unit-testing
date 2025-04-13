@@ -1,0 +1,37 @@
+{
+  "driver": "batterymonitor",
+  "testType": "board_specific",
+  "boardSupport": [
+    "lpf3"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "toolchain": [
+    "gcc",
+    "iar",
+    "llvm"
+  ],
+  "dependencies": [
+    "[DRIVERS]/source/ti/drivers/temperature/TemperatureLPF3.c",
+    "[DRIVERS]/source/ti/drivers/batterymonitor/BatteryMonitorLPF3.c",
+    "[DRIVERS]/source/ti/drivers/batterymonitor/BatMonSupportLPF3.c"
+  ],
+  "testFiles": {
+    "c": [
+      "[TEST]/src/testcase_batterymonitor_lpf3.c"
+    ],
+    "h": [],
+    "py": [],
+    "syscfg": []
+  },
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/temperature/TemperatureLPF3.c",
+    "[DRIVERS]/source/ti/drivers/batterymonitor/BatteryMonitorLPF3.c",
+    "[DRIVERS]/source/ti/drivers/batterymonitor/BatMonSupportLPF3.c"
+  ],
+  "created": "2025-04-11T16:40:25.569Z",
+  "updated": "2025-04-11T16:40:25.569Z"
+}

@@ -1,0 +1,22 @@
+{
+    tools: [ gcc, iar, llvm ],
+    supportedOS: [ tirtos7, freertos, nortos ],
+    boards: [
+        all_cc13xx_cc26xx,
+    ],
+
+    fileLists: {
+        all: [
+            # Test source files
+            { path: "[TEST]/src/testcase_dac_general.c" },
+            { path: "[TEST]/src/dac.syscfg" },
+
+            # Top-level drivers
+            { path: "[DRIVERS]/source/ti/drivers/DAC.c", targetDirectory: drivers, coverage: true },
+        ],
+        # Device-specific drivers below
+        all_cc13xx_cc26xx: [
+            { path: "[DRIVERS]/source/ti/drivers/dac/DACCC26X2.c", targetDirectory: drivers, coverage: true },
+        ],
+    },
+}

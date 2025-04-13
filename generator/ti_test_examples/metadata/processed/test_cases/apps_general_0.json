@@ -1,0 +1,39 @@
+{
+  "driver": "apps",
+  "testType": "general",
+  "boardSupport": [
+    "all_cc13xx_cc26xx",
+    "all_lpf3",
+    "all_wff3"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "toolchain": [
+    "gcc",
+    "iar",
+    "llvm"
+  ],
+  "dependencies": [
+    "[DRIVERS]/source/ti/drivers/GPIO.c",
+    "[DRIVERS]/source/ti/drivers/apps/Button.c"
+  ],
+  "testFiles": {
+    "c": [
+      "[TEST]/src/testcases.c"
+    ],
+    "h": [],
+    "py": [],
+    "syscfg": [
+      "[TEST]/src/button.syscfg"
+    ]
+  },
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/GPIO.c",
+    "[DRIVERS]/source/ti/drivers/apps/Button.c"
+  ],
+  "created": "2025-04-11T16:40:25.567Z",
+  "updated": "2025-04-11T16:40:25.567Z"
+}

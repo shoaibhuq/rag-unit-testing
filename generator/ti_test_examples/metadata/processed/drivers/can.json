@@ -1,0 +1,23 @@
+{
+  "name": "can",
+  "boardSupport": [
+    "all_cc13x1_cc26x1",
+    "all_cc13x2_cc26x2",
+    "all_cc23x0",
+    "all_cc27xx"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos"
+  ],
+  "testCases": [
+    "can_general_0"
+  ],
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/CAN.c",
+    "[DRIVERS]/source/ti/drivers/can/common/CANMCAN.c",
+    "[DRIVERS]/source/third_party/mcan/MCAN.c",
+    "[DRIVERS]/source/ti/drivers/can/TCAN455X.c",
+    "[DRIVERS]/source/ti/drivers/can/CANCC27XX.c"
+  ]
+}

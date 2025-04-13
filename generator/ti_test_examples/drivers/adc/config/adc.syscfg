@@ -1,0 +1,46 @@
+var board = system.deviceData.board.name;
+const TestConfig = system.getScript("test_config.syscfg.js");
+
+/* ======== ADC ========= */
+var ADC   = scripting.addModule("/ti/drivers/ADC");
+var ADC1  = ADC.addInstance();
+var ADC2  = ADC.addInstance();
+
+if (board.match(/CC2340R2/) && !board.match(/CC2340R22/)) {
+    ADC1.$name                          = "CONFIG_ADC_0";
+    // Use of BP7 requires LP_EM_CC2340R2 header P6 pins 3 and 5 to be jumpered,
+    // and LP_EM_CC2340R2 BP7 to be jumper-wired to IOTH BP23.
+    ADC1.adcChannel.adc.adcPin.$assign  = "boosterpack.7";
+    ADC1.adcSampleTime                  = 300; // give it lots of time to sample due to low DAC driver-strength
+
+    ADC2.$name                          = "CONFIG_ADC_1";
+    // Use of BP14 requires LP_EM_CC2340R2 header P2 pins 2 and 4 to be jumpered,
+    // and LP_EM_CC2340R2 BP14 to be jumper-wired to IOTH BP27.
+    ADC2.adcChannel.adc.adcPin.$assign  = "boosterpack.14";
+    ADC2.adcSampleTime                  = 300; // give it lots of time to sample due to low DAC driver-strength
+}
+else if(board.match(/CC23/)) {
+    ADC1.$name                          = "CONFIG_ADC_0";
+    ADC1.adcChannel.adc.adcPin.$assign  = "boosterpack.23";
+    ADC1.adcSampleTime                  = 300; // give it lots of time to sample due to low DAC driver-strength
+
+    ADC2.$name                          = "CONFIG_ADC_1";
+    ADC2.adcChannel.adc.adcPin.$assign  = "boosterpack.27";
+    ADC2.adcSampleTime                  = 300; // give it lots of time to sample due to low DAC driver-strength
+}
+else if(board.match(/CC27/)) {
+    ADC1.$name                          = "CONFIG_ADC_0";
+    ADC1.adcChannel.adc.adcPin.$assign  = "boosterpack.2";
+    ADC1.adcSampleTime                  = 300; // give it lots of time to sample due to low DAC driver-strength
+
+    ADC2.$name                          = "CONFIG_ADC_1";
+    ADC2.adcChannel.adc.adcPin.$assign  = "boosterpack.6";
+    ADC2.adcSampleTime                  = 300; // give it lots of time to sample due to low DAC driver-strength
+}
+else {
+    ADC1.$name                = "CONFIG_ADC_0";
+    ADC1.adc.adcPin.$assign   = "boosterpack.24";
+
+    ADC2.$name                = "CONFIG_ADC_1";
+    ADC2.adc.adcPin.$assign   = "boosterpack.25";
+}

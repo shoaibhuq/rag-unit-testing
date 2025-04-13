@@ -6,6 +6,42 @@ import * as path from "path";
 import * as fs from "fs";
 import * as dotenv from "dotenv";
 
+// Add embedding model class
+/**
+ * OpenAI embedding model wrapper
+ */
+export class OpenAIEmbeddingModel {
+  private openai: OpenAI;
+  
+  constructor(apiKey: string) {
+    this.openai = new OpenAI({ apiKey });
+  }
+  
+  /**
+   * Generate an embedding for text
+   */
+  async embed(text: string): Promise<number[]> {
+    const response = await this.openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: text,
+      dimensions: 1536,
+    });
+    return response.data[0].embedding;
+  }
+}
+
+// Define type for embeddings
+type Embedding = number[];
+// Define type for function embeddings
+interface FunctionEmbedding {
+  id: string;
+  functionName: string;
+  content: string;
+  embedding: number[];
+  filePath?: string;
+  [key: string]: any;
+}
+
 // Load environment variables with absolute path
 const workspaceRoot =
   vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
@@ -32,12 +68,13 @@ interface FunctionData {
   lastUpdated?: number; // Timestamp for cache control
 }
 
-// Interface for parsed function data
+// Define interface for parsed function data
 interface ParsedFunction {
   functionName: string;
   content: string;
   parameters: string[];
   returnType: string;
+  filePath?: string;
 }
 
 // Interface for the embedding cache
@@ -134,6 +171,22 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+// Enhanced interfaces for hierarchical embeddings
+interface MetadataAttributes {
+  driverType?: string;
+  testType?: 'general' | 'board_specific';
+  complexity?: 'simple' | 'medium' | 'complex';
+  category?: string[];
+  patterns?: string[];
+}
+
+// Updated interface for enhanced function embeddings
+interface EnhancedFunctionEmbedding extends FunctionEmbedding {
+  metadata?: MetadataAttributes;
+  testCaseId?: string;
+  sectionType?: 'setup' | 'execution' | 'cleanup' | 'assertion' | 'full';
+}
+
 export class SimpleVectorManager {
   private openai: OpenAI;
   private isInitialized: boolean = false;
@@ -147,8 +200,16 @@ export class SimpleVectorManager {
     reject: (error: Error) => void;
   }[] = [];
   private batchTimer: NodeJS.Timeout | null = null;
+  private embeddingModel: OpenAIEmbeddingModel;
+  private functionEmbeddings: EnhancedFunctionEmbedding[] = [];
+  private cache: EmbeddingCache | null = null;
 
   constructor() {
+    console.log("Initializing SimpleVectorManager...");
+    this.embeddingModel = new OpenAIEmbeddingModel(
+      process.env.OPENAI_API_KEY || ""
+    );
+
     // Try to get credentials from VS Code settings first
     const config = vscode.workspace.getConfiguration("rag-unit-testing");
 
@@ -539,74 +600,188 @@ export class SimpleVectorManager {
   }
 
   /**
-   * Searches for functions that are semantically similar to the provided text.
-   * @param queryText - The text to search for similar functions.
-   * @param limit - The maximum number of similar functions to return. Default is 5.
-   * @returns A promise that resolves to an array of similar function objects or an empty array if none are found or an error occurs.
+   * Stores function embeddings with enhanced metadata
    */
-  public async searchSimilarFunctions(
-    queryText: string,
-    limit: number = 5
-  ): Promise<FunctionData[]> {
-    if (!this.isInitialized) {
-      console.warn(
-        "Attempted search before SimpleVectorManager was initialized."
-      );
-      const initialized = await this.initialize();
-      if (!initialized) {
-        console.error("Failed to initialize SimpleVectorManager for search.");
-        return [];
+  async storeWithMetadata(
+    functions: ParsedFunction[],
+    metadata?: MetadataAttributes
+  ): Promise<boolean> {
+    try {
+      // Process functions in batches to avoid rate limiting
+      const embeddingRequests: Promise<Embedding>[] = [];
+      console.log(`Processing batch of ${functions.length} embedding requests`);
+
+      for (const func of functions) {
+        embeddingRequests.push(
+          this.embeddingModel.embed(func.content)
+        );
       }
+
+      const embeddings = await Promise.all(embeddingRequests);
+      
+      // Create enhanced embeddings with metadata
+      for (let i = 0; i < functions.length; i++) {
+        const enhancedEmbedding: EnhancedFunctionEmbedding = {
+          id: createHash("sha256")
+            .update(`${functions[i].filePath || "unknown"}::${functions[i].functionName}`)
+            .digest("hex"),
+          functionName: functions[i].functionName,
+          content: functions[i].content,
+          parameters: functions[i].parameters,
+          returnType: functions[i].returnType,
+          filePath: functions[i].filePath,
+          embedding: embeddings[i],
+          metadata: metadata || this.inferMetadata(functions[i]),
+          lastUpdated: Date.now(),
+        };
+        
+        this.functionEmbeddings.push(enhancedEmbedding);
+      }
+
+      // Cache the new embeddings - removed problematic code
+      console.log(`Stored ${functions.length} function embeddings`);
+
+      return true;
+    } catch (error) {
+      console.error("Error storing functions with metadata:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Infer metadata from function content
+   * @param func The function to analyze
+   * @returns Inferred metadata attributes
+   */
+  private inferMetadata(func: ParsedFunction): MetadataAttributes {
+    const metadata: MetadataAttributes = {
+      category: []
+    };
+    
+    // Infer complexity based on code length and structure
+    if (func.content.length < 500) {
+      metadata.complexity = 'simple';
+    } else if (func.content.length < 1500) {
+      metadata.complexity = 'medium';
+    } else {
+      metadata.complexity = 'complex';
+    }
+    
+    // Infer test patterns present
+    const patterns: string[] = [];
+    
+    if (func.content.includes("assert") || func.content.includes("TEST_")) {
+      patterns.push('assertion');
+    }
+    
+    if (func.content.includes("malloc") || func.content.includes("free")) {
+      patterns.push('memory-management');
+    }
+    
+    if (func.content.includes("open") || func.content.includes("close")) {
+      patterns.push('resource-management');
+    }
+    
+    if (func.content.includes("try") || func.content.includes("catch") || 
+        func.content.includes("if") && func.content.includes("return") && 
+        func.content.includes("error")) {
+      patterns.push('error-handling');
+    }
+    
+    metadata.patterns = patterns;
+    
+    return metadata;
+  }
+
+  /**
+   * Finds similar functions with metadata-aware filtering
+   * @param code The code to find similar functions for
+   * @param filters Optional metadata filters to apply
+   * @param limit Maximum number of results to return
+   * @returns Array of similar functions
+   */
+  async findSimilarWithFilters(
+    code: string,
+    filters?: Partial<MetadataAttributes>,
+    limit: number = 5
+  ): Promise<FunctionEmbedding[]> {
+    if (!this.isInitialized) {
+      console.warn("Vector manager not initialized");
+      return [];
+    }
+
+    if (this.functionEmbeddings.length === 0) {
+      console.warn("No function embeddings available");
+      return [];
     }
 
     try {
-      if (this.functionStore.length === 0) {
-        console.log("Function store is empty. Nothing to search.");
-        return [];
-      }
-
-      console.log(
-        `Searching for functions similar to query text (length: ${queryText.length})`
-      );
-
-      // Generate embedding for the query
-      const queryEmbedding = await this.generateEmbedding(queryText);
-
-      // Find similar functions by computing cosine similarity
-      const withSimilarity = this.functionStore
-        .filter((func) => func.embedding && func.embedding.length > 0) // Ensure we have embeddings
-        .map((func) => {
-          // Calculate similarity
-          const similarity = cosineSimilarity(queryEmbedding, func.embedding!);
-          return {
-            ...func,
-            distance: 1 - similarity, // Convert similarity to distance (lower is better)
-          };
-        })
-        .sort((a, b) => a.distance! - b.distance!); // Sort by distance (ascending)
-
-      // Take top results
-      const results = withSimilarity.slice(0, limit);
-
-      console.log(`Found ${results.length} similar functions.`);
-
-      // Log results for debugging
-      results.forEach((func, i) => {
-        console.log(
-          ` - ${i + 1}. ${
-            func.functionName
-          } (Distance: ${func.distance!.toFixed(4)})`
-        );
+      const embedding = await this.generateEmbedding(code);
+      
+      // Calculate similarities
+      const withSimilarities = this.functionEmbeddings.map((func) => {
+        const similarity = cosineSimilarity(embedding, func.embedding!);
+        return { ...func, similarity };
       });
-
-      return results;
-    } catch (error: any) {
-      console.error("Error searching similar functions:", error);
-      vscode.window.showErrorMessage(
-        `Failed to search for similar functions: ${error.message}`
-      );
+      
+      // Apply metadata filters if provided
+      let filtered = withSimilarities;
+      if (filters) {
+        filtered = withSimilarities.filter(func => {
+          const metadata = func.metadata;
+          if (!metadata) return true;
+          
+          // Apply each filter
+          for (const [key, value] of Object.entries(filters)) {
+            if (key === 'category' || key === 'patterns') {
+              // For array fields, check for any overlap
+              const metaArray = metadata[key as 'category' | 'patterns'];
+              const filterArray = value as string[];
+              
+              if (metaArray && filterArray && 
+                  !metaArray.some(item => filterArray.includes(item))) {
+                return false;
+              }
+            } else if (metadata[key as keyof MetadataAttributes] !== value) {
+              return false;
+            }
+          }
+          return true;
+        });
+      }
+      
+      // Sort by similarity and take top results
+      return filtered
+        .sort((a, b) => (b.similarity || 0) - (a.similarity || 0))
+        .slice(0, limit);
+    } catch (error) {
+      console.error("Error finding similar functions with filters:", error);
       return [];
     }
+  }
+
+  /**
+   * Find test cases containing specific patterns
+   * @param patternType The type of pattern to search for
+   * @param limit Maximum number of results to return
+   * @returns Array of functions matching the pattern
+   */
+  findTestPatterns(
+    patternType: string,
+    limit: number = 3
+  ): FunctionEmbedding[] {
+    if (!this.isInitialized) {
+      console.warn("Vector manager not initialized");
+      return [];
+    }
+
+    // Filter by pattern type
+    const matches = this.functionEmbeddings.filter(func => 
+      func.metadata?.patterns?.includes(patternType)
+    );
+    
+    // Return top matches up to limit
+    return matches.slice(0, limit);
   }
 
   /**

@@ -1,0 +1,28 @@
+{
+  "driver": "apu",
+  "testType": "board_specific",
+  "boardSupport": [
+    "cc27xx"
+  ],
+  "osSupport": [
+    "freertos",
+    "nortos"
+  ],
+  "toolchain": [
+    "gcc",
+    "iar",
+    "llvm"
+  ],
+  "dependencies": [],
+  "testFiles": {
+    "c": [
+      "[TEST]/src/testcases_apu_general.c"
+    ],
+    "h": [],
+    "py": [],
+    "syscfg": []
+  },
+  "sourceFiles": [],
+  "created": "2025-04-11T16:40:25.567Z",
+  "updated": "2025-04-11T16:40:25.567Z"
+}
