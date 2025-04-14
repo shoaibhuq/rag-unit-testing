@@ -222,7 +222,8 @@ async function generateTests(state: GraphState): Promise<Partial<GraphState>> {
           Generate only the test code, with no additional explanation or markdown formatting.`
         )
       : PromptTemplate.fromTemplate(
-          `You are an expert C programmer specializing in unit testing with Unity test framework.
+        
+          `You are an expert C programmer specializing in unit testing with the Unity framework.
           Your task is to generate comprehensive unit tests for the given C function.
 
           **Function to Test:**
@@ -236,42 +237,24 @@ async function generateTests(state: GraphState): Promise<Partial<GraphState>> {
           {similarFunctionsCode}
           \`\`\`
 
-          **Function Details:**
-          - Name: {functionName}
-          - Parameters: {parameters}
-          - Return Type: {returnType}
-
           **Instructions:**
-          1. Analyze the function code ({functionName}) provided above.
-          2. Consider edge cases, typical inputs, boundary conditions, and potential error scenarios.
-          3. Generate a complete C test file using Unity test framework.
-          4. Include the following components:
-             - Necessary includes (unity.h, the file being tested)
-             - Test setup and teardown functions
-             - Test functions with appropriate naming (test_{functionName}_...)
-             - Appropriate assertions (TEST_ASSERT_EQUAL, TEST_ASSERT_NULL, etc.)
-          5. Handle specific C features:
-             - Memory allocation/deallocation
-             - Pointer handling
-             - Error conditions
-             - Resource cleanup
-          6. Include comprehensive test cases:
-             - Happy path (normal operation)
-             - Edge cases (NULL inputs, boundary values)
-             - Error cases (invalid inputs)
-             - Memory leaks
-             - Resource management
-          7. Add detailed comments explaining:
-             - Purpose of each test case
-             - Expected behavior
-             - Any special conditions or setup
-          8. Use Unity test features:
-             - Setup and teardown functions
-             - Test groups
-             - Custom assertions if needed
+          1.  Analyze the function code ({functionName}) provided above.
+          2.  Consider edge cases, typical inputs, boundary conditions, and potential error scenarios.
+          3.  Use the Unity testing framework syntax (e.g., TEST_ASSERT_EQUAL_INT, TEST_ASSERT_NULL, setUp, tearDown).
+          4.  Generate a complete C file containing the necessary includes (#include "unity.h", #include "{functionName}.h"), setUp, tearDown (if needed, otherwise leave empty), and test functions (test_{functionName}_...).
+          5.  Include a main function that initializes Unity (UNITY_BEGIN/END) and runs the generated test functions (RUN_TEST).
+          6.  Focus on testing the logic within the provided function code. Use the context for understanding potential usage patterns but do not test the context functions directly.
+          7.  If the function involves pointers, test null pointer inputs if applicable.
+          8.  If the function involves arrays or buffers, test boundary conditions (e.g., empty, full, oversized).
+          9.  Add comments explaining the purpose of each test case.
+          10. Ensure the generated code is clean, well-formatted, and syntactically correct C.
 
-          Generate only the test code, with no additional explanation or markdown formatting.`
-        );
+          **Output:**
+          Provide only the complete C code for the unit test file. Do not include any explanations outside the code comments.
+
+          **Generated Unit Test Code:**
+          `
+    );
 
     const testGeneratorChain = testGenPrompt
       .pipe(llm)
