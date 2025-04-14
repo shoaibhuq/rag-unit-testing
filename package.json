@@ -13,14 +13,15 @@
     "onCommand:rag-unit-testing.generateUnitTest",
     "onCommand:rag-unit-testing.printVectorEmbeddings",
     "onCommand:rag-unit-testing.configure",
-    "onLanguage:c"
+    "onLanguage:c",
+    "onLanguage:python"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "rag-unit-testing.generateUnitTest",
-        "title": "Generate C Unit Test - RAG Unit Testing"
+        "title": "Generate Unit Test - RAG Unit Testing"
       },
       {
         "command": "rag-unit-testing.printVectorEmbeddings",
@@ -35,21 +36,21 @@
       "explorer/context": [
         {
           "command": "rag-unit-testing.generateUnitTest",
-          "when": "resourceLangId == c",
+          "when": "resourceLangId == c || resourceLangId == python",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
           "command": "rag-unit-testing.generateUnitTest",
-          "when": "resourceLangId == c",
+          "when": "resourceLangId == c || resourceLangId == python",
           "group": "1_modification"
         }
       ],
       "editor/title/context": [
         {
           "command": "rag-unit-testing.generateUnitTest",
-          "when": "resourceLangId == c",
+          "when": "resourceLangId == c || resourceLangId == python",
           "group": "navigation"
         }
       ]

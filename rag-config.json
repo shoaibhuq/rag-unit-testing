@@ -1,0 +1,21 @@
+{
+  "llm": {
+    "model": "gpt-4o-mini",
+    "temperature": 0.3,
+    "maxTokens": 4000
+  },
+  "analyze": {
+    "includedFiles": ["*.c", "*.h", "*.py"],
+    "excludedFiles": ["test_*.c", "test_*.py"],
+    "maxContextFiles": 10
+  },
+  "vectorDB": {
+    "enabled": true,
+    "cacheDir": ".vector-cache",
+    "cacheTTL": 604800000
+  },
+  "langsmith": {
+    "enabled": false,
+    "project": "rag-unit-testing"
+  }
+} 

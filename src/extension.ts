@@ -6,6 +6,7 @@ import * as fs from "fs/promises"; // Use promises for async file operations
 // Import local modules
 import { SimpleVectorManager } from "./simple-vector"; // Import our simple vector manager
 import { CParser } from "./c-parser"; // Import our advanced C parser
+import { PythonParser, PythonCodeElement } from "./python-parser";
 
 // Import LangChain and LangGraph components
 import { ChatOpenAI } from "@langchain/openai";
@@ -25,6 +26,15 @@ import { RunnableLambda } from "@langchain/core/runnables";
 import { Client } from "langsmith";
 import { LangChainTracer } from "langchain/callbacks";
 
+// Load configuration settings
+import { loadConfig } from './config';
+
+const config = loadConfig();
+
+// Example usage:
+console.log("LLM Model:", config.llm.model);
+console.log("Included Files:", config.analyze.includedFiles);
+
 // --- LangGraph Setup ---
 
 // Define the state interface for the graph
@@ -35,6 +45,23 @@ interface GraphState {
   similarFunctionsCode?: string; // Code of similar functions (context)
   generatedTestCode?: string; // The final generated unit test code
   errorMessage?: string; // To capture errors during graph execution
+  language: 'c' | 'python'; // Language of the function
+  className?: string; // For Python class methods
+  isMethod?: boolean; // For Python class methods
+  decorators?: string[]; // For Python decorators
+  parameters?: string[]; // Function parameters
+  returnType?: string; // Function return type
+}
+
+// Define a common interface for parsed functions
+export interface ParsedFunction {
+  functionName: string;
+  className?: string;
+  parameters: string[];
+  returnType?: string;
+  content: string;
+  decorators?: string[];
+  isMethod?: boolean;
 }
 
 // Define the graph nodes
@@ -95,9 +122,7 @@ async function retrieveContext(
  * Node: Generates unit test code using an LLM.
  */
 async function generateTests(state: GraphState): Promise<Partial<GraphState>> {
-  console.log(
-    `[${new Date().toISOString()}] --- Node: generateTests starting ---`
-  );
+  console.log(`[${new Date().toISOString()}] --- Node: generateTests starting ---`);
   if (!state.functionCode) {
     console.error("Function code is missing, cannot generate tests.");
     return { errorMessage: "Function code is missing, cannot generate tests." };
@@ -105,31 +130,19 @@ async function generateTests(state: GraphState): Promise<Partial<GraphState>> {
 
   // Get OpenAI API key from VS Code settings or environment variables
   const config = vscode.workspace.getConfiguration("rag-unit-testing");
-  const openaiApiKey =
-    (config.get("openaiApiKey") as string) || process.env.OPENAI_API_KEY;
+  const openaiApiKey = (config.get("openaiApiKey") as string) || process.env.OPENAI_API_KEY;
 
   if (!openaiApiKey) {
-    console.error(
-      "OpenAI API key is not configured in either VS Code settings or environment variables."
-    );
-    return {
-      errorMessage:
-        "OpenAI API key is not configured in either VS Code settings or environment variables.",
-    };
+    console.error("OpenAI API key is not configured in either VS Code settings or environment variables.");
+    return { errorMessage: "OpenAI API key is not configured in either VS Code settings or environment variables." };
   }
 
-  console.log(
-    `[${new Date().toISOString()}] OpenAI API key found (length: ${
-      openaiApiKey.length
-    })`
-  );
-  console.log(
-    `[${new Date().toISOString()}] Creating LLM instance with model: gpt-4o-mini`
-  );
+  console.log(`[${new Date().toISOString()}] OpenAI API key found (length: ${openaiApiKey.length})`);
+  console.log(`[${new Date().toISOString()}] Creating LLM instance with model: gpt-4o-mini`);
 
   try {
     const llm = new ChatOpenAI({
-      modelName: "gpt-4o-mini", // Or your preferred model
+      modelName: "gpt-4o-mini",
       temperature: 0.3,
       apiKey: openaiApiKey,
     });
@@ -141,52 +154,124 @@ async function generateTests(state: GraphState): Promise<Partial<GraphState>> {
         projectName: process.env.LANGSMITH_PROJECT || "rag-unit-testing",
         client: new Client({
           apiKey: process.env.LANGSMITH_API_KEY,
-          apiUrl:
-            process.env.LANGSMITH_ENDPOINT || "https://api.smith.langchain.com",
+          apiUrl: process.env.LANGSMITH_ENDPOINT || "https://api.smith.langchain.com",
         }),
       });
-
-      // Add tracer to LLM callbacks
       llm.callbacks = [tracer];
     }
 
-    console.log(
-      `[${new Date().toISOString()}] LLM initialized, preparing prompt template`
-    );
+    console.log(`[${new Date().toISOString()}] LLM initialized, preparing prompt template`);
 
-    const testGenPrompt = PromptTemplate.fromTemplate(
-      `You are an expert C programmer specializing in unit testing with the Unity framework.
-    Your task is to generate comprehensive unit tests for the given C function.
+    // Choose the appropriate prompt template based on the language
+    const testGenPrompt = state.language === 'python' 
+      ? PromptTemplate.fromTemplate(
+          `You are an expert Python programmer specializing in unit testing with pytest and unittest.
+          Your task is to generate comprehensive unit tests for the given Python function.
 
-    **Function to Test:**
-    File Path: {filePath}
-    \`\`\`c
-    {functionCode}
-    \`\`\`
+          **Function to Test:**
+          File Path: {filePath}
+          \`\`\`python
+          {functionCode}
+          \`\`\`
 
-    **Context (Code from similar functions found in the project):**
-    \`\`\`c
-    {similarFunctionsCode}
-    \`\`\`
+          **Context (Code from similar functions found in the project):**
+          \`\`\`python
+          {similarFunctionsCode}
+          \`\`\`
 
-    **Instructions:**
-    1.  Analyze the function code ({functionName}) provided above.
-    2.  Consider edge cases, typical inputs, boundary conditions, and potential error scenarios.
-    3.  Use the Unity testing framework syntax (e.g., TEST_ASSERT_EQUAL_INT, TEST_ASSERT_NULL, setUp, tearDown).
-    4.  Generate a complete C file containing the necessary includes (#include "unity.h", #include "{functionName}.h"), setUp, tearDown (if needed, otherwise leave empty), and test functions (test_{functionName}_...).
-    5.  Include a main function that initializes Unity (UNITY_BEGIN/END) and runs the generated test functions (RUN_TEST).
-    6.  Focus on testing the logic within the provided function code. Use the context for understanding potential usage patterns but do not test the context functions directly.
-    7.  If the function involves pointers, test null pointer inputs if applicable.
-    8.  If the function involves arrays or buffers, test boundary conditions (e.g., empty, full, oversized).
-    9.  Add comments explaining the purpose of each test case.
-    10. Ensure the generated code is clean, well-formatted, and syntactically correct C.
+          **Function Details:**
+          - Name: {functionName}
+          - Parameters: {parameters}
+          - Return Type: {returnType}
+          - Class: {className}
+          - Is Method: {isMethod}
+          - Decorators: {decorators}
 
-    **Output:**
-    Provide only the complete C code for the unit test file. Do not include any explanations outside the code comments.
+          **Instructions:**
+          1. Analyze the function code ({functionName}) provided above.
+          2. Consider edge cases, typical inputs, boundary conditions, and potential error scenarios.
+          3. Generate a complete Python test file using pytest as the primary framework, with unittest compatibility.
+          4. Include the following components:
+             - Necessary imports (pytest, unittest, any required modules)
+             - Test fixtures using @pytest.fixture
+             - Test classes if testing class methods
+             - Test functions with appropriate naming (test_{functionName}_...)
+             - Appropriate assertions (assert, pytest.raises, etc.)
+          5. Handle specific Python features:
+             - If the function is async, use pytest.mark.asyncio and async/await
+             - If the function uses context managers, test with 'with' statements
+             - If the function has decorators, test their effects
+             - If testing class methods, include class setup/teardown
+             - If the function raises exceptions, test with pytest.raises
+          6. Include comprehensive test cases:
+             - Happy path (normal operation)
+             - Edge cases (empty inputs, boundary values)
+             - Error cases (invalid inputs, exceptions)
+             - Type checking (if type hints are present)
+             - State verification (if the function modifies state)
+          7. Add detailed docstrings and comments explaining:
+             - Purpose of each test case
+             - Expected behavior
+             - Any special conditions or setup
+          8. Use pytest features:
+             - Parametrized tests for multiple test cases
+             - Fixtures for setup/teardown
+             - Markers for test categorization
+             - Skip/xfail for conditional tests
 
-    **Generated Unit Test Code:**
-    `
-    );
+          Generate only the test code, with no additional explanation or markdown formatting.`
+        )
+      : PromptTemplate.fromTemplate(
+          `You are an expert C programmer specializing in unit testing with Unity test framework.
+          Your task is to generate comprehensive unit tests for the given C function.
+
+          **Function to Test:**
+          File Path: {filePath}
+          \`\`\`c
+          {functionCode}
+          \`\`\`
+
+          **Context (Code from similar functions found in the project):**
+          \`\`\`c
+          {similarFunctionsCode}
+          \`\`\`
+
+          **Function Details:**
+          - Name: {functionName}
+          - Parameters: {parameters}
+          - Return Type: {returnType}
+
+          **Instructions:**
+          1. Analyze the function code ({functionName}) provided above.
+          2. Consider edge cases, typical inputs, boundary conditions, and potential error scenarios.
+          3. Generate a complete C test file using Unity test framework.
+          4. Include the following components:
+             - Necessary includes (unity.h, the file being tested)
+             - Test setup and teardown functions
+             - Test functions with appropriate naming (test_{functionName}_...)
+             - Appropriate assertions (TEST_ASSERT_EQUAL, TEST_ASSERT_NULL, etc.)
+          5. Handle specific C features:
+             - Memory allocation/deallocation
+             - Pointer handling
+             - Error conditions
+             - Resource cleanup
+          6. Include comprehensive test cases:
+             - Happy path (normal operation)
+             - Edge cases (NULL inputs, boundary values)
+             - Error cases (invalid inputs)
+             - Memory leaks
+             - Resource management
+          7. Add detailed comments explaining:
+             - Purpose of each test case
+             - Expected behavior
+             - Any special conditions or setup
+          8. Use Unity test features:
+             - Setup and teardown functions
+             - Test groups
+             - Custom assertions if needed
+
+          Generate only the test code, with no additional explanation or markdown formatting.`
+        );
 
     const testGeneratorChain = testGenPrompt
       .pipe(llm)
@@ -210,6 +295,11 @@ async function generateTests(state: GraphState): Promise<Partial<GraphState>> {
       functionCode: state.functionCode,
       similarFunctionsCode:
         state.similarFunctionsCode || "// No context provided",
+      parameters: state.parameters?.join(', ') || '',
+      returnType: state.returnType || '',
+      className: state.className || '',
+      isMethod: state.isMethod || false,
+      decorators: state.decorators?.join(', ') || ''
     });
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -318,6 +408,11 @@ let vectorManagerInstance: SimpleVectorManager | null = null;
 // Track if LangSmith tracing is enabled
 let langsmithTracingEnabled = false;
 
+// Global variables for parsers and vector manager
+let cParser: CParser | null = null;
+let pythonParser: PythonParser | null = null;
+let vectorManager: SimpleVectorManager | null = null;
+
 export function activate(context: vscode.ExtensionContext) {
   console.log('Congratulations, extension "rag-unit-testing" is now active!');
 
@@ -398,6 +493,23 @@ export function activate(context: vscode.ExtensionContext) {
     })
     .catch((error) => {
       console.error("Error initializing C parser:", error);
+    });
+
+  // Initialize Python parser - do this in parallel with C parser initialization
+  pythonParser = new PythonParser();
+  pythonParser
+    .initialize()
+    .then((initialized) => {
+      if (initialized) {
+        console.log("Python parser initialized successfully.");
+      } else {
+        console.warn(
+          "Python parser initialization failed, will use fallback regex parser."
+        );
+      }
+    })
+    .catch((error) => {
+      console.error("Error initializing Python parser:", error);
     });
 
   // Initialize LangSmith tracing if configured
@@ -481,6 +593,35 @@ export function activate(context: vscode.ExtensionContext) {
         default: (): undefined => undefined,
       },
       errorMessage: {
+        value: (x?: string, y?: string): string | undefined =>
+          y !== undefined ? y : x,
+        default: (): undefined => undefined,
+      },
+      language: {
+        value: (x?: 'c' | 'python', y?: 'c' | 'python'): 'c' | 'python' => y ?? x ?? 'c',
+        default: (): 'c' => 'c',
+      },
+      className: {
+        value: (x?: string, y?: string): string | undefined =>
+          y !== undefined ? y : x,
+        default: (): undefined => undefined,
+      },
+      isMethod: {
+        value: (x?: boolean, y?: boolean): boolean | undefined =>
+          y !== undefined ? y : x,
+        default: (): undefined => undefined,
+      },
+      decorators: {
+        value: (x?: string[], y?: string[]): string[] | undefined =>
+          y !== undefined ? y : x,
+        default: (): undefined => undefined,
+      },
+      parameters: {
+        value: (x?: string[], y?: string[]): string[] | undefined =>
+          y !== undefined ? y : x,
+        default: (): undefined => undefined,
+      },
+      returnType: {
         value: (x?: string, y?: string): string | undefined =>
           y !== undefined ? y : x,
         default: (): undefined => undefined,
@@ -592,10 +733,10 @@ export function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        // Ensure it's a C file (basic check)
-        if (!targetUri.fsPath.match(/\.(c|h)$/i)) {
+        // Ensure it's a C or Python file (basic check)
+        if (!targetUri.fsPath.match(/\.(c|h|py)$/i)) {
           vscode.window.showWarningMessage(
-            "Please select a C source file (.c or .h)."
+            "Please select a C source file (.c or .h) or Python file (.py)."
           );
           return;
         }
@@ -654,17 +795,25 @@ export function activate(context: vscode.ExtensionContext) {
             );
           }
 
-          // 2. Extract function name
-          const functionMatch = fileContent.match(
-            /^\s*(?:[\w\s\*]+?)\s+(\w+)\s*\(/m
-          );
-          let functionName = functionMatch ? functionMatch[1] : undefined;
+          // 2. Extract function name based on file type
+          let functionName: string | undefined;
+          const fileExtension = path.extname(filePath).toLowerCase();
+
+          if (fileExtension === '.py') {
+            // For Python files, try to extract function or class name
+            const pythonMatch = fileContent.match(/^\s*(?:def|class)\s+(\w+)\s*\(/m);
+            functionName = pythonMatch ? pythonMatch[1] : undefined;
+          } else {
+            // For C files, use the existing regex
+            const functionMatch = fileContent.match(/^\s*(?:[\w\s\*]+?)\s+(\w+)\s*\(/m);
+            functionName = functionMatch ? functionMatch[1] : undefined;
+          }
 
           if (!functionName || functionName === "main") {
             functionName = await vscode.window.showInputBox({
               prompt:
                 "Could not auto-detect function. Enter the function name to test:",
-              placeHolder: "e.g., calculate_sum",
+              placeHolder: fileExtension === '.py' ? "e.g., calculate_sum" : "e.g., calculate_sum",
               value:
                 functionName && functionName !== "main" ? functionName : "", // Pre-fill if partially detected
             });
@@ -681,19 +830,36 @@ export function activate(context: vscode.ExtensionContext) {
           let targetFunction = null;
           let parsedFunctions = [];
 
-          // Try using Tree-sitter parser first
-          if (cParser && (await cParser.initialize())) {
+          // Try using appropriate parser based on file type
+          if (fileExtension === '.py' && pythonParser && (await pythonParser.initialize())) {
+            console.log("Using Python parser to find functions");
+            const parsedFile = pythonParser.parseContent(fileContent, filePath);
+            const pythonFunctions: ParsedFunction[] = parsedFile.elements
+              .filter((element: PythonCodeElement) => element.type === 'function')
+              .map((element: PythonCodeElement) => ({
+                functionName: element.name,
+                content: element.content,
+                parameters: [],
+                returnType: ''
+              }));
+            targetFunction = pythonFunctions.find(
+              (f: ParsedFunction) => f.functionName === functionName
+            );
+          } else if (fileExtension.match(/\.(c|h)$/i) && cParser && (await cParser.initialize())) {
             console.log("Using Tree-sitter parser to find functions");
             parsedFunctions = cParser.parseFunctions(fileContent, filePath);
             targetFunction = parsedFunctions.find(
-              (f) => f.functionName === functionName
+              (f: ParsedFunction) => f.functionName === functionName
             );
           }
 
           // Fall back to regex parser if needed
           if (!targetFunction) {
             console.log("Falling back to regex parser");
-            if (cParser) {
+            if (fileExtension === '.py') {
+              // Use the Python regex parser
+              parsedFunctions = parsePythonFunctions(fileContent);
+            } else if (cParser) {
               // Use the fallback method from the C parser
               parsedFunctions = cParser.fallbackParseFunctions(fileContent);
             } else {
@@ -701,7 +867,7 @@ export function activate(context: vscode.ExtensionContext) {
               parsedFunctions = parseCFunctions(fileContent);
             }
             targetFunction = parsedFunctions.find(
-              (f) => f.functionName === functionName
+              (f: ParsedFunction) => f.functionName === functionName
             );
           }
 
@@ -804,12 +970,18 @@ export function activate(context: vscode.ExtensionContext) {
             functionName: functionName,
             functionCode: functionCode,
             filePath: filePath,
+            language: fileExtension === '.py' ? 'python' : 'c',
             // If there's additional context and we don't use vector DB, provide it directly
             similarFunctionsCode: vectorDBAvailable
               ? undefined
               : additionalContext,
             generatedTestCode: undefined,
             errorMessage: undefined,
+            className: (targetFunction as ParsedFunction)?.className,
+            isMethod: (targetFunction as ParsedFunction)?.isMethod,
+            decorators: (targetFunction as ParsedFunction)?.decorators,
+            parameters: (targetFunction as ParsedFunction)?.parameters,
+            returnType: (targetFunction as ParsedFunction)?.returnType,
           };
 
           // 5. Invoke LangGraph workflow with Progress Indicator
@@ -873,7 +1045,7 @@ export function activate(context: vscode.ExtensionContext) {
                   targetUri.fsPath,
                   path.extname(targetUri.fsPath)
                 );
-                const testFileName = `test${originalFilename}.c`;
+                const testFileName = `test_${originalFilename}${fileExtension === '.py' ? '.py' : '.c'}`;
                 const testFileUri = vscode.Uri.joinPath(
                   targetUri,
                   "..",
@@ -1222,3 +1394,79 @@ function parseCFunctions(fileContent: string): Array<{
 // Note: This is a basic parser and may not handle all C syntax correctly.
 // For production, consider using a more robust parser (e.g., tree-sitter) or a library that can handle C syntax accurately.
 // Note: Ensure to handle edge cases and test thoroughly with various C code samples.
+
+// Function to parse Python functions using regex (fallback method)
+function parsePythonFunctions(content: string): ParsedFunction[] {
+  const functions: ParsedFunction[] = [];
+  const lines = content.split('\n');
+  
+  // Regular expression for Python function definitions
+  const functionRegex = /^def\s+(\w+)\s*\(/;
+  
+  let currentFunction: { name: string; startLine: number } | undefined;
+  let functionLines: string[] = [];
+  let indentationLevel = 0;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmedLine = line.trim();
+    
+    // Skip empty lines and comments
+    if (!trimmedLine || trimmedLine.startsWith('#')) {
+      if (currentFunction) {
+        functionLines.push(line);
+      }
+      continue;
+    }
+    
+    // Check for function definition
+    const functionMatch = trimmedLine.match(functionRegex);
+    if (functionMatch) {
+      // Save previous function if exists
+      if (currentFunction) {
+        functions.push({
+          functionName: currentFunction.name,
+          content: functionLines.join('\n'),
+          parameters: [],
+          returnType: ''
+        });
+      }
+      
+      // Start new function
+      currentFunction = {
+        name: functionMatch[1],
+        startLine: i
+      };
+      functionLines = [line];
+      indentationLevel = line.search(/\S/);
+    } else if (currentFunction) {
+      // Check if we're still in the function
+      const currentIndentation = line.search(/\S/);
+      if (currentIndentation > indentationLevel) {
+        functionLines.push(line);
+      } else {
+        // Function ended
+        functions.push({
+          functionName: currentFunction.name,
+          content: functionLines.join('\n'),
+          parameters: [],
+          returnType: ''
+        });
+        currentFunction = undefined;
+        functionLines = [];
+      }
+    }
+  }
+  
+  // Add the last function if exists
+  if (currentFunction) {
+    functions.push({
+      functionName: currentFunction.name,
+      content: functionLines.join('\n'),
+      parameters: [],
+      returnType: ''
+    });
+  }
+  
+  return functions;
+}

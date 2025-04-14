@@ -5,6 +5,8 @@ import { createHash } from "crypto";
 import * as path from "path";
 import * as fs from "fs";
 import * as dotenv from "dotenv";
+import { CParser, ParsedFunction } from "./c-parser";
+import { PythonParser, PythonCodeElement } from "./python-parser";
 
 // Load environment variables with absolute path
 const workspaceRoot =
@@ -20,7 +22,7 @@ if (fs.existsSync(envPath)) {
 }
 
 // Define interface for function data
-interface FunctionData {
+interface StoredFunction {
   functionName: string;
   content: string;
   parameters: string[];
@@ -30,14 +32,10 @@ interface FunctionData {
   distance?: number;
   embedding?: number[];
   lastUpdated?: number; // Timestamp for cache control
-}
-
-// Interface for parsed function data
-interface ParsedFunction {
-  functionName: string;
-  content: string;
-  parameters: string[];
-  returnType: string;
+  language?: 'c' | 'python'; // Add language field to distinguish between C and Python
+  className?: string; // For Python class methods
+  isMethod?: boolean; // For Python class methods
+  decorators?: string[]; // For Python decorators
 }
 
 // Interface for the embedding cache
@@ -53,65 +51,9 @@ interface EmbeddingCache {
 const CACHE_TTL = 1000 * 60 * 60 * 24 * 7; // 1 week in milliseconds
 const BATCH_SIZE = 10; // Maximum batch size for embedding generation
 
-/**
- * Parses C functions from file content using regular expressions.
- * @param fileContent - The string content of the C file.
- * @returns An array of parsed function objects.
- */
-function parseCFunctions(fileContent: string): Array<ParsedFunction> {
-  const functions: Array<ParsedFunction> = [];
-
-  // Remove comments first to simplify parsing
-  const contentWithoutComments = fileContent
-    .replace(/\/\*[\s\S]*?\*\//g, "") // Remove multi-line comments /* ... */
-    .replace(/\/\/.*$/gm, ""); // Remove single-line comments // ...
-
-  // Improved regex to capture function definitions
-  const functionRegex =
-    /^([\w\s\*]+?)\s+(\w+)\s*\(([^)]*)\)\s*(?:;|\{([\s\S]*?)(?:^|\n)\s*\})/gm;
-
-  let match;
-  while ((match = functionRegex.exec(contentWithoutComments)) !== null) {
-    // Improved filtering to avoid matching struct initializations or other constructs
-    if (
-      match[1].includes(";") ||
-      match[1].trim().startsWith("struct") ||
-      match[1].trim().startsWith("enum") ||
-      match[1].trim().startsWith("typedef") ||
-      match[1].trim().startsWith("#") ||
-      !match[4] // Skip function declarations (no body)
-    ) {
-      continue;
-    }
-
-    const returnType = match[1].trim().replace(/\s+/g, " "); // Normalize whitespace in return type
-    const functionName = match[2].trim();
-    const paramsString = match[3].trim();
-    const content = match[0]; // Full match including signature and body
-
-    // Skip main function
-    if (functionName === "main") {
-      continue;
-    }
-
-    const parameters = paramsString
-      ? paramsString
-          .split(",")
-          .map((p) => p.trim())
-          .filter((p) => p !== "void" && p !== "") // Handle 'void' and empty params
-      : [];
-
-    functions.push({
-      functionName,
-      content,
-      parameters,
-      returnType,
-    });
-  }
-
-  console.log(`Parser found ${functions.length} functions.`);
-  return functions;
-}
+// Initialize parsers
+const cParser = new CParser();
+const pythonParser = new PythonParser();
 
 /**
  * Simple vector similarity calculation using cosine similarity
@@ -137,7 +79,7 @@ function cosineSimilarity(a: number[], b: number[]): number {
 export class SimpleVectorManager {
   private openai: OpenAI;
   private isInitialized: boolean = false;
-  private functionStore: FunctionData[] = [];
+  private functionStore: StoredFunction[] = [];
   private cacheDir: string;
   private embeddingCache: EmbeddingCache = {}; // In-memory cache
   private pendingEmbeddings: Map<string, Promise<number[]>> = new Map(); // To prevent duplicate requests
@@ -453,88 +395,67 @@ export class SimpleVectorManager {
     filePath: string,
     fileContent: string
   ): Promise<void> {
-    if (!this.isInitialized) {
-      console.log("Initializing SimpleVectorManager before storing context...");
-      const initialized = await this.initialize();
-      if (!initialized) {
-        vscode.window.showErrorMessage(
-          "Cannot store file context: Vector storage initialization failed."
-        );
-        return;
-      }
-    }
-
     try {
-      // Parse the C functions from the file content
-      const functions = parseCFunctions(fileContent);
+      // Determine file type from extension
+      const ext = path.extname(filePath).toLowerCase();
+      let functions: ParsedFunction[] = [];
 
-      if (functions.length === 0) {
-        console.log("No functions found by parser in:", filePath);
-        vscode.window.showInformationMessage(
-          "No functions found to store from this file."
-        );
+      if (ext === '.c' || ext === '.h') {
+        functions = cParser.parseFunctions(fileContent, filePath);
+      } else if (ext === '.py') {
+        // Convert PythonCodeElement to ParsedFunction
+        const pythonElements = pythonParser.parseContent(fileContent, filePath).elements;
+        functions = pythonElements
+          .filter(element => element.type === 'function' || element.type === 'method')
+          .map(element => ({
+            functionName: element.name,
+            content: element.content,
+            parameters: element.parameters,
+            returnType: element.returnType || 'any',
+            className: element.parentClass,
+            isMethod: element.type === 'method',
+            decorators: element.decorators
+          }));
+      } else {
+        console.log(`Skipping unsupported file type: ${ext}`);
         return;
       }
-
-      console.log(
-        `Found ${functions.length} functions in ${filePath} to store:`
-      );
-
-      // Remove existing functions from this file path
-      this.functionStore = this.functionStore.filter(
-        (f) => f.filePath !== filePath
-      );
-
-      // Process functions in batches to avoid overwhelming the API
-      const embedPromises: Promise<void>[] = [];
 
       // Process each function
       for (const func of functions) {
-        // Generate a consistent ID based on file path and function name
-        const id = createHash("sha256")
-          .update(`${filePath}::${func.functionName}`)
-          .digest("hex");
+        const functionData: StoredFunction = {
+          ...func,
+          filePath,
+          id: createHash('md5')
+            .update(`${func.functionName}-${filePath}`)
+            .digest('hex'),
+          lastUpdated: Date.now(),
+        };
 
-        console.log(` - Processing ${func.functionName}`);
+        // Check if function already exists in store
+        const existingIndex = this.functionStore.findIndex(
+          (f) => f.id === functionData.id
+        );
 
-        // Create a promise for this function's embedding
-        const embedPromise = (async () => {
-          // Generate an embedding for the function
-          const embedding = await this.generateEmbedding(func.content);
-
-          // Add to store
+        if (existingIndex !== -1) {
+          // Update existing function
+          this.functionStore[existingIndex] = {
+            ...this.functionStore[existingIndex],
+            ...functionData,
+          };
+        } else {
+          // Add new function
           this.functionStore.push({
-            id,
-            functionName: func.functionName,
-            content: func.content,
-            parameters: func.parameters,
-            returnType: func.returnType,
-            filePath,
-            embedding,
-            lastUpdated: Date.now(),
+            ...functionData,
           });
-        })();
-
-        embedPromises.push(embedPromise);
+        }
       }
 
-      // Wait for all embedding operations to complete
-      await Promise.all(embedPromises);
-
-      // Save to cache
+      // Save updated store to cache
       await this.saveCache();
-
-      console.log(`Successfully stored ${functions.length} functions.`);
-      vscode.window.showInformationMessage(
-        `Successfully stored ${functions.length} functions from ${path.basename(
-          filePath
-        )}.`
-      );
-    } catch (error: any) {
+    } catch (error) {
       console.error("Error storing file context:", error);
-      vscode.window.showErrorMessage(
-        `Failed to store file context: ${error.message}`
-      );
+      throw error;
     }
   }
 
@@ -547,7 +468,7 @@ export class SimpleVectorManager {
   public async searchSimilarFunctions(
     queryText: string,
     limit: number = 5
-  ): Promise<FunctionData[]> {
+  ): Promise<StoredFunction[]> {
     if (!this.isInitialized) {
       console.warn(
         "Attempted search before SimpleVectorManager was initialized."
@@ -578,9 +499,20 @@ export class SimpleVectorManager {
         .map((func) => {
           // Calculate similarity
           const similarity = cosineSimilarity(queryEmbedding, func.embedding!);
+          
+          // Apply language-specific adjustments if needed
+          let adjustedSimilarity = similarity;
+          
+          // For Python functions, we might want to adjust the similarity based on
+          // Python-specific features like decorators or class membership
+          if (func.language === 'python') {
+            // For now, we'll keep the similarity as is
+            // In the future, we could add Python-specific adjustments here
+          }
+          
           return {
             ...func,
-            distance: 1 - similarity, // Convert similarity to distance (lower is better)
+            distance: 1 - adjustedSimilarity, // Convert similarity to distance (lower is better)
           };
         })
         .sort((a, b) => a.distance! - b.distance!); // Sort by distance (ascending)
@@ -595,7 +527,7 @@ export class SimpleVectorManager {
         console.log(
           ` - ${i + 1}. ${
             func.functionName
-          } (Distance: ${func.distance!.toFixed(4)})`
+          } (${func.language || 'unknown'} function, Distance: ${func.distance!.toFixed(4)})`
         );
       });
 
@@ -641,6 +573,23 @@ export class SimpleVectorManager {
         console.log(`\n=== Function: ${func.functionName} ===`);
         console.log(`ID: ${func.id}`);
         console.log(`File Path: ${func.filePath || "N/A"}`);
+        console.log(`Language: ${func.language || "unknown"}`);
+        
+        // Print Python-specific information if available
+        if (func.language === 'python') {
+          if (func.className) {
+            console.log(`Class: ${func.className}`);
+          }
+          if (func.isMethod) {
+            console.log(`Type: Method`);
+          } else {
+            console.log(`Type: Function`);
+          }
+          if (func.decorators && func.decorators.length > 0) {
+            console.log(`Decorators: ${func.decorators.join(', ')}`);
+          }
+        }
+        
         console.log(
           `Last Updated: ${
             func.lastUpdated
