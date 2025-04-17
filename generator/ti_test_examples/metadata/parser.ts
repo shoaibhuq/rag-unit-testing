@@ -77,6 +77,12 @@ export function extractTestCaseMetadata(
 ): TestCaseMetadata[] {
   const metadata: TestCaseMetadata[] = [];
   
+  // Check if fileLists exists in config
+  if (!config.fileLists) {
+    console.warn(`Warning: No fileLists found in configuration for ${driverName}`);
+    return metadata;
+  }
+  
   // Parse general test files
   const generalTestFiles = extractTestFilesByType(config, 'all', /test.*\.c$/i);
   
@@ -84,9 +90,9 @@ export function extractTestCaseMetadata(
     const generalTestCase: TestCaseMetadata = {
       driver: driverName,
       testType: 'general',
-      boardSupport: config.boards,
-      osSupport: config.supportedOS,
-      toolchain: config.tools,
+      boardSupport: config.boards || [],
+      osSupport: config.supportedOS || [],
+      toolchain: config.tools || [],
       dependencies: extractSourceFiles(config, 'all'),
       testFiles: {
         c: generalTestFiles,
@@ -190,20 +196,23 @@ function extractTestFilesByType(
 ): string[] {
   const files: string[] = [];
   
-  if (config.fileLists[section]) {
-    // Check if the section is an array
-    if (Array.isArray(config.fileLists[section])) {
-      // Handle array structure
-      for (const file of config.fileLists[section] as any[]) {
-        if (pattern.test(file.path)) {
-          files.push(file.path);
-        }
+  // Check if fileLists exists and the section exists
+  if (!config.fileLists || !config.fileLists[section]) {
+    return files;
+  }
+  
+  // Check if the section is an array
+  if (Array.isArray(config.fileLists[section])) {
+    // Handle array structure
+    for (const file of config.fileLists[section] as any[]) {
+      if (pattern.test(file.path)) {
+        files.push(file.path);
       }
-    } else if (typeof config.fileLists[section] === 'object') {
-      // Handle object structure (e.g., nested sections)
-      // Just skip it for now as it contains nested sections instead of files
-      console.log(`Skipping object structure in section ${section} - contains nested sections`);
     }
+  } else if (typeof config.fileLists[section] === 'object') {
+    // Handle object structure (e.g., nested sections)
+    // Just skip it for now as it contains nested sections instead of files
+    console.log(`Skipping object structure in section ${section} - contains nested sections`);
   }
   
   return files;
@@ -218,20 +227,23 @@ function extractTestFilesByType(
 function extractSourceFiles(config: ProjectConfig, section: string): string[] {
   const files: string[] = [];
   
-  if (config.fileLists[section]) {
-    // Check if the section is an array
-    if (Array.isArray(config.fileLists[section])) {
-      // Handle array structure
-      for (const file of config.fileLists[section] as any[]) {
-        if (!file.path.includes("[TEST]") && /\.c$/i.test(file.path)) {
-          files.push(file.path);
-        }
+  // Check if fileLists exists and the section exists
+  if (!config.fileLists || !config.fileLists[section]) {
+    return files;
+  }
+  
+  // Check if the section is an array
+  if (Array.isArray(config.fileLists[section])) {
+    // Handle array structure
+    for (const file of config.fileLists[section] as any[]) {
+      if (!file.path.includes("[TEST]") && /\.c$/i.test(file.path)) {
+        files.push(file.path);
       }
-    } else if (typeof config.fileLists[section] === 'object') {
-      // Handle object structure (e.g., nested sections)
-      // Just skip it for now as it contains nested sections instead of files
-      console.log(`Skipping object structure in section ${section} - contains nested sections`);
     }
+  } else if (typeof config.fileLists[section] === 'object') {
+    // Handle object structure (e.g., nested sections)
+    // Just skip it for now as it contains nested sections instead of files
+    console.log(`Skipping object structure in section ${section} - contains nested sections`);
   }
   
   return files;

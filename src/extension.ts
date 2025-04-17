@@ -68,7 +68,7 @@ async function retrieveContext(
   const primaryFunction = state.functions[0];
   let contextResult = "";
   
-  // First try to get context from TI test examples
+  // Focus on TI test examples exclusively
   if (tiTestIntegrator && tiTestIntegrator.isReady()) {
     try {
       // Try to detect driver type from function code or path
@@ -79,6 +79,11 @@ async function retrieveContext(
         if (fileName.includes("adc")) driverName = "adcbuf";
         else if (fileName.includes("gpio")) driverName = "gpio";
         else if (fileName.includes("uart")) driverName = "uart";
+        else if (fileName.includes("nvs")) driverName = "nvs";
+        else if (fileName.includes("i2c")) driverName = "i2c";
+        else if (fileName.includes("spi")) driverName = "spi";
+        else if (fileName.includes("timer")) driverName = "timer";
+        else if (fileName.includes("watchdog")) driverName = "watchdog";
         // Add more mappings as needed
       }
       
@@ -100,75 +105,44 @@ async function retrieveContext(
         // Add the most relevant test examples
         contextResult += "# Relevant TI Test Examples\n\n";
         
-        for (const example of tiExamples.slice(0, 2)) { // Limit to top 2 examples
+        // Include more TI examples for better context
+        for (const example of tiExamples.slice(0, 3)) { // Include top 3 examples
           contextResult += `## ${path.basename(example.filePath)}\n`;
           contextResult += `Driver: ${example.metadata.driver}\n`;
           contextResult += `Board: ${example.metadata.boardSupport.join(", ")}\n`;
           contextResult += "```c\n";
-          contextResult += example.content.substring(0, 2000) + (example.content.length > 2000 ? "...\n" : "\n");
+          contextResult += example.content.substring(0, 3000) + (example.content.length > 3000 ? "...\n" : "\n");
           contextResult += "```\n\n";
         }
+        
+        return { similarFunctionsCode: contextResult };
       } else {
-        console.log("No relevant TI test examples found");
+        console.log("No relevant TI test examples found, looking for generic test patterns");
+        
+        // Try to get generic test patterns for drivers
+        if (driverName) {
+          try {
+            const genericPatterns = await tiTestIntegrator.extractTITestingPatterns(driverName);
+            if (genericPatterns) {
+              contextResult = "# Generic TI Testing Patterns\n\n" + genericPatterns;
+              return { similarFunctionsCode: contextResult };
+            }
+          } catch (error) {
+            console.error("Error getting generic test patterns:", error);
+          }
+        }
       }
     } catch (error) {
       console.error("Error retrieving TI test examples:", error);
     }
   }
   
-  // Then try regular vector database
-  if (!vectorManager || !(vectorManager as any).isReady()) {
-    console.warn(
-      "Vector database not available - continuing without RAG context"
-    );
-    return {
-      similarFunctionsCode: contextResult || 
-        "// Vector database not available. Generating tests without similar function context.",
-    };
-  }
-  
-  try {
-    // Search for functions similar to the primary function's code
-    const similarFunctions = await vectorManager.findSimilarWithFilters(
-      primaryFunction.functionCode,
-      undefined, // No specific metadata filters
-      3 // Limit to 3
-    ); // Limit to 3
-
-    if (similarFunctions && similarFunctions.length > 0) {
-      const regularContext = similarFunctions
-        .map(
-          (f: any) =>
-            `// Similar function from ${path.basename(
-              f.filePath || "unknown_file"
-            )}\n${f.content || ""}`
-        ) // Add fallback for potentially missing properties
-        .join("\n\n---\n\n");
-        
-      // Combine TI context with regular context
-      if (contextResult) {
-        contextResult += "\n\n# Similar Functions from Codebase\n\n" + regularContext;
-      } else {
-        contextResult = regularContext;
-      }
-      
-      console.log(
-        `Retrieved ${similarFunctions.length} similar functions as context.`
-      );
-      return { similarFunctionsCode: contextResult };
-    } else {
-      console.log("No similar functions found.");
-      return {
-        similarFunctionsCode: contextResult || "// No similar functions found in the database.",
-      };
-    }
-  } catch (error: any) {
-    console.error("Error retrieving context:", error);
-    return {
-      similarFunctionsCode: contextResult || 
-        `// Error retrieving context: ${error.message}. Generating tests without RAG.`,
-    };
-  }
+  // Skip looking up regular vector database similar functions
+  console.log("Focusing exclusively on TI engineer test cases and patterns");
+  return {
+    similarFunctionsCode: contextResult || 
+      "// Generating tests based on TI engineering best practices without additional context.",
+  };
 }
 
 /**
@@ -316,6 +290,14 @@ async function generateTests(state: GraphState): Promise<Partial<GraphState>> {
       `
     Given the following instructions on generating tests, the conditions your test should explore, and the source code generate a test for {function_name}.
 
+    You should follow TI's testing style which includes:
+    1. Device-family handling with #if defined(DeviceFamily_...) and ti_drivers_config.h
+    2. Utility functions like isSectorErased() and isSectorProgrammed() to verify flash contents
+    3. Parameterized test functions with thin zero-arg wrappers for Unity
+    4. Explicit test runner that lists all tests
+    5. Rich assertion messages with every TEST_ASSERT
+    6. Proper BSD-style license header
+
     For each condition, create a initialize -> call -> validate pattern within the test function. Always comment beforehand to clarify your intent.
     The test should be in the style of Unity tests, which are used for testing embedded systems. The tests should be written in C and follow the Unity test framework conventions.
     Test functions should be named test_<module_name>_<function_name>.
@@ -334,7 +316,18 @@ async function generateTests(state: GraphState): Promise<Partial<GraphState>> {
       `
     Create a comprehensive header for a Unity test file that will test multiple functions from a single source file.
     Include all necessary includes and setup/teardown functions that would be shared by all tests.
-    Do not include specific test cases, just the header boilerplate and any common test utilities.
+    
+    Follow TI's style guidelines:
+    1. Add a BSD-style license header
+    2. Include device-family handling with conditional definitions:
+       #if defined(DeviceFamily_CC26X4) || defined(DeviceFamily_CC13X4)
+         #define FLASH_SECTOR_SIZE    0x800
+         #define FLASH_REGION_BASE    CONFIG_NVSINTERNAL
+         #define FLASH_REGION_SIZE    0x4000
+       #endif
+    3. Add utility functions for flash validation:
+       - isSectorErased() to verify memory is erased (filled with 0xFF)
+       - isSectorProgrammed() to verify memory matches test patterns
     
     The header should be suitable for testing these functions: {function_names}
     Source code: {file_contents}
@@ -377,6 +370,10 @@ async function generateTests(state: GraphState): Promise<Partial<GraphState>> {
     // Start building the consolidated test file
     let consolidatedTestCode = testHeader + "\n\n";
     
+    // Track covered functions for full coverage validation
+    const allDriverFunctions = state.functions.map(f => f.functionName);
+    const coveredFunctions = new Set<string>();
+    
     // Process each function individually
     for (const funcInfo of state.functions) {
       console.log(`Processing function: ${funcInfo.functionName}`);
@@ -417,16 +414,64 @@ async function generateTests(state: GraphState): Promise<Partial<GraphState>> {
       
       // Add function's test code to consolidated output
       consolidatedTestCode += `/* Tests for ${funcInfo.functionName} */\n${functionTestCode}\n\n`;
+      
+      // Mark function as covered
+      coveredFunctions.add(funcInfo.functionName);
     }
     
-    // Add main function at the end
+    // If any functions were not covered, generate basic tests for them
+    const uncoveredFunctions = allDriverFunctions.filter(f => !coveredFunctions.has(f));
+    if (uncoveredFunctions.length > 0) {
+      console.log(`Generating basic tests for ${uncoveredFunctions.length} uncovered functions`);
+      
+      for (const uncoveredFunc of uncoveredFunctions) {
+        const funcInfo = state.functions.find(f => f.functionName === uncoveredFunc);
+        if (funcInfo) {
+          // Generate a basic test with minimal conditions
+          const basicConditions = {
+            [uncoveredFunc]: [
+              "Basic success condition checking normal operation",
+              "Basic failure condition with invalid parameters"
+            ]
+          };
+          
+          // Generate test code
+          const basicTestCode = await testGenPrompt.invoke({
+            function_name: uncoveredFunc,
+            conditions: basicConditions,
+            file_contents: funcInfo.functionCode,
+            similarFunctionsCode: state.similarFunctionsCode,
+          });
+          
+          // Add to consolidated output
+          consolidatedTestCode += `/* Basic tests for ${uncoveredFunc} */\n${basicTestCode}\n\n`;
+        }
+      }
+    }
+    
+    // Add main function at the end with proper UNITY_BEGIN/END and RUN_TEST for each
     consolidatedTestCode += `
 /* Main test runner */
 int main(void) {
     UNITY_BEGIN();
     
     /* Run all tests */
-${state.functions.map(f => `    RUN_TEST(test_${f.functionName});`).join("\n")}
+${state.functions.map(f => {
+  // Check if the function name has any wrapper tests
+  const pattern = new RegExp(`test_[a-z_]*${f.functionName.toLowerCase().replace(/^.*_/, '')}[a-z0-9_]*\\(void\\)`, 'gi');
+  const wrapperMatches = consolidatedTestCode.match(pattern);
+  
+  if (wrapperMatches && wrapperMatches.length > 0) {
+    // Return run statements for all wrappers
+    return wrapperMatches.map(wrapper => {
+      const funcName = wrapper.substring(0, wrapper.indexOf('('));
+      return `    RUN_TEST(${funcName});`;
+    }).join("\n");
+  } else {
+    // Fallback to simple test name
+    return `    RUN_TEST(test_${f.functionName.toLowerCase().replace('nvs_', 'nvs_')});`;
+  }
+}).join("\n")}
     
     return UNITY_END();
 }
@@ -780,9 +825,8 @@ export function activate(context: vscode.ExtensionContext) {
 
           // Filter out main function or any unwanted functions
           parsedFunctions = parsedFunctions.filter(f => 
-            f.functionName !== "main" && 
-            // Filter out very short functions that are likely simple getters/setters
-            f.content.split('\n').length > 5
+            f.functionName !== "main" 
+            // Don't filter out functions based on line count, since many valid functions are short
           );
 
           if (parsedFunctions.length === 0) {

@@ -74,7 +74,7 @@ async function retrieveContext(state, vectorManager, tiTestIntegrator) {
     // Use the first function as the primary context source
     const primaryFunction = state.functions[0];
     let contextResult = "";
-    // First try to get context from TI test examples
+    // Focus on TI test examples exclusively
     if (tiTestIntegrator && tiTestIntegrator.isReady()) {
         try {
             // Try to detect driver type from function code or path
@@ -88,6 +88,16 @@ async function retrieveContext(state, vectorManager, tiTestIntegrator) {
                     driverName = "gpio";
                 else if (fileName.includes("uart"))
                     driverName = "uart";
+                else if (fileName.includes("nvs"))
+                    driverName = "nvs";
+                else if (fileName.includes("i2c"))
+                    driverName = "i2c";
+                else if (fileName.includes("spi"))
+                    driverName = "spi";
+                else if (fileName.includes("timer"))
+                    driverName = "timer";
+                else if (fileName.includes("watchdog"))
+                    driverName = "watchdog";
                 // Add more mappings as needed
             }
             // Find relevant TI examples
@@ -101,64 +111,44 @@ async function retrieveContext(state, vectorManager, tiTestIntegrator) {
                 }
                 // Add the most relevant test examples
                 contextResult += "# Relevant TI Test Examples\n\n";
-                for (const example of tiExamples.slice(0, 2)) { // Limit to top 2 examples
+                // Include more TI examples for better context
+                for (const example of tiExamples.slice(0, 3)) { // Include top 3 examples
                     contextResult += `## ${path.basename(example.filePath)}\n`;
                     contextResult += `Driver: ${example.metadata.driver}\n`;
                     contextResult += `Board: ${example.metadata.boardSupport.join(", ")}\n`;
                     contextResult += "```c\n";
-                    contextResult += example.content.substring(0, 2000) + (example.content.length > 2000 ? "...\n" : "\n");
+                    contextResult += example.content.substring(0, 3000) + (example.content.length > 3000 ? "...\n" : "\n");
                     contextResult += "```\n\n";
                 }
+                return { similarFunctionsCode: contextResult };
             }
             else {
-                console.log("No relevant TI test examples found");
+                console.log("No relevant TI test examples found, looking for generic test patterns");
+                // Try to get generic test patterns for drivers
+                if (driverName) {
+                    try {
+                        const genericPatterns = await tiTestIntegrator.extractTITestingPatterns(driverName);
+                        if (genericPatterns) {
+                            contextResult = "# Generic TI Testing Patterns\n\n" + genericPatterns;
+                            return { similarFunctionsCode: contextResult };
+                        }
+                    }
+                    catch (error) {
+                        console.error("Error getting generic test patterns:", error);
+                    }
+                }
             }
         }
         catch (error) {
             console.error("Error retrieving TI test examples:", error);
         }
     }
-    // Then try regular vector database
-    if (!vectorManager || !vectorManager.isReady()) {
-        console.warn("Vector database not available - continuing without RAG context");
-        return {
-            similarFunctionsCode: contextResult ||
-                "// Vector database not available. Generating tests without similar function context.",
-        };
-    }
-    try {
-        // Search for functions similar to the primary function's code
-        const similarFunctions = await vectorManager.findSimilarWithFilters(primaryFunction.functionCode, undefined, // No specific metadata filters
-        3 // Limit to 3
-        ); // Limit to 3
-        if (similarFunctions && similarFunctions.length > 0) {
-            const regularContext = similarFunctions
-                .map((f) => `// Similar function from ${path.basename(f.filePath || "unknown_file")}\n${f.content || ""}`) // Add fallback for potentially missing properties
-                .join("\n\n---\n\n");
-            // Combine TI context with regular context
-            if (contextResult) {
-                contextResult += "\n\n# Similar Functions from Codebase\n\n" + regularContext;
-            }
-            else {
-                contextResult = regularContext;
-            }
-            console.log(`Retrieved ${similarFunctions.length} similar functions as context.`);
-            return { similarFunctionsCode: contextResult };
-        }
-        else {
-            console.log("No similar functions found.");
-            return {
-                similarFunctionsCode: contextResult || "// No similar functions found in the database.",
-            };
-        }
-    }
-    catch (error) {
-        console.error("Error retrieving context:", error);
-        return {
-            similarFunctionsCode: contextResult ||
-                `// Error retrieving context: ${error.message}. Generating tests without RAG.`,
-        };
-    }
+    // Skip looking up regular vector database similar functions
+    console.log("Focusing exclusively on TI engineer test cases and patterns");
+    return {
+        similarFunctionsCode: contextResult ||
+            "// Generating tests based on TI engineering best practices without additional context.",
+    };
 }
 /**
  * Node: Generates unit test code using an LLM.
@@ -271,6 +261,14 @@ async function generateTests(state) {
         const testGeneratorPrompt = prompts_1.PromptTemplate.fromTemplate(`
     Given the following instructions on generating tests, the conditions your test should explore, and the source code generate a test for {function_name}.
 
+    You should follow TI's testing style which includes:
+    1. Device-family handling with #if defined(DeviceFamily_...) and ti_drivers_config.h
+    2. Utility functions like isSectorErased() and isSectorProgrammed() to verify flash contents
+    3. Parameterized test functions with thin zero-arg wrappers for Unity
+    4. Explicit test runner that lists all tests
+    5. Rich assertion messages with every TEST_ASSERT
+    6. Proper BSD-style license header
+
     For each condition, create a initialize -> call -> validate pattern within the test function. Always comment beforehand to clarify your intent.
     The test should be in the style of Unity tests, which are used for testing embedded systems. The tests should be written in C and follow the Unity test framework conventions.
     Test functions should be named test_<module_name>_<function_name>.
@@ -285,7 +283,18 @@ async function generateTests(state) {
         const testHeaderPrompt = prompts_1.PromptTemplate.fromTemplate(`
     Create a comprehensive header for a Unity test file that will test multiple functions from a single source file.
     Include all necessary includes and setup/teardown functions that would be shared by all tests.
-    Do not include specific test cases, just the header boilerplate and any common test utilities.
+    
+    Follow TI's style guidelines:
+    1. Add a BSD-style license header
+    2. Include device-family handling with conditional definitions:
+       #if defined(DeviceFamily_CC26X4) || defined(DeviceFamily_CC13X4)
+         #define FLASH_SECTOR_SIZE    0x800
+         #define FLASH_REGION_BASE    CONFIG_NVSINTERNAL
+         #define FLASH_REGION_SIZE    0x4000
+       #endif
+    3. Add utility functions for flash validation:
+       - isSectorErased() to verify memory is erased (filled with 0xFF)
+       - isSectorProgrammed() to verify memory matches test patterns
     
     The header should be suitable for testing these functions: {function_names}
     Source code: {file_contents}
@@ -316,6 +325,9 @@ async function generateTests(state) {
         });
         // Start building the consolidated test file
         let consolidatedTestCode = testHeader + "\n\n";
+        // Track covered functions for full coverage validation
+        const allDriverFunctions = state.functions.map(f => f.functionName);
+        const coveredFunctions = new Set();
         // Process each function individually
         for (const funcInfo of state.functions) {
             console.log(`Processing function: ${funcInfo.functionName}`);
@@ -349,15 +361,58 @@ async function generateTests(state) {
             });
             // Add function's test code to consolidated output
             consolidatedTestCode += `/* Tests for ${funcInfo.functionName} */\n${functionTestCode}\n\n`;
+            // Mark function as covered
+            coveredFunctions.add(funcInfo.functionName);
         }
-        // Add main function at the end
+        // If any functions were not covered, generate basic tests for them
+        const uncoveredFunctions = allDriverFunctions.filter(f => !coveredFunctions.has(f));
+        if (uncoveredFunctions.length > 0) {
+            console.log(`Generating basic tests for ${uncoveredFunctions.length} uncovered functions`);
+            for (const uncoveredFunc of uncoveredFunctions) {
+                const funcInfo = state.functions.find(f => f.functionName === uncoveredFunc);
+                if (funcInfo) {
+                    // Generate a basic test with minimal conditions
+                    const basicConditions = {
+                        [uncoveredFunc]: [
+                            "Basic success condition checking normal operation",
+                            "Basic failure condition with invalid parameters"
+                        ]
+                    };
+                    // Generate test code
+                    const basicTestCode = await testGenPrompt.invoke({
+                        function_name: uncoveredFunc,
+                        conditions: basicConditions,
+                        file_contents: funcInfo.functionCode,
+                        similarFunctionsCode: state.similarFunctionsCode,
+                    });
+                    // Add to consolidated output
+                    consolidatedTestCode += `/* Basic tests for ${uncoveredFunc} */\n${basicTestCode}\n\n`;
+                }
+            }
+        }
+        // Add main function at the end with proper UNITY_BEGIN/END and RUN_TEST for each
         consolidatedTestCode += `
 /* Main test runner */
 int main(void) {
     UNITY_BEGIN();
     
     /* Run all tests */
-${state.functions.map(f => `    RUN_TEST(test_${f.functionName});`).join("\n")}
+${state.functions.map(f => {
+            // Check if the function name has any wrapper tests
+            const pattern = new RegExp(`test_[a-z_]*${f.functionName.toLowerCase().replace(/^.*_/, '')}[a-z0-9_]*\\(void\\)`, 'gi');
+            const wrapperMatches = consolidatedTestCode.match(pattern);
+            if (wrapperMatches && wrapperMatches.length > 0) {
+                // Return run statements for all wrappers
+                return wrapperMatches.map(wrapper => {
+                    const funcName = wrapper.substring(0, wrapper.indexOf('('));
+                    return `    RUN_TEST(${funcName});`;
+                }).join("\n");
+            }
+            else {
+                // Fallback to simple test name
+                return `    RUN_TEST(test_${f.functionName.toLowerCase().replace('nvs_', 'nvs_')});`;
+            }
+        }).join("\n")}
     
     return UNITY_END();
 }
@@ -619,9 +674,9 @@ function activate(context) {
                     }
                 }
                 // Filter out main function or any unwanted functions
-                parsedFunctions = parsedFunctions.filter(f => f.functionName !== "main" &&
-                    // Filter out very short functions that are likely simple getters/setters
-                    f.content.split('\n').length > 5);
+                parsedFunctions = parsedFunctions.filter(f => f.functionName !== "main"
+                // Don't filter out functions based on line count, since many valid functions are short
+                );
                 if (parsedFunctions.length === 0) {
                     const userInput = await vscode.window.showInputBox({
                         prompt: "No testable functions found. Enter a function name manually:",
@@ -18077,315 +18132,191 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.TestCaseValidator = void 0;
 const vscode = __importStar(__webpack_require__(1));
 /**
- * Validates test cases against TI best practices
+ * Test Case Validator
+ * Validates generated test cases against best practices
  */
 class TestCaseValidator {
-    // Initialization patterns
-    setupPatterns = [
-        /commonTestOpen/i,
-        /setUp/i,
-        /initialize/i,
-        /init.*Test/i
-    ];
-    // Assertion patterns
-    assertionPatterns = [
-        /assert/i,
-        /TEST_ASSERT/i,
-        /EXPECT_/i,
-        /verify/i,
-        /check/i
-    ];
-    // Cleanup patterns
-    cleanupPatterns = [
-        /commonTestClose/i,
-        /tearDown/i,
-        /cleanup/i,
-        /finalize/i,
-        /free/i
-    ];
-    // Error handling patterns
-    errorHandlingPatterns = [
-        /if\s*\(.*error/i,
-        /try\s*{/i,
-        /catch\s*\(/i,
-        /return.*error/i
-    ];
-    // Documentation patterns
-    documentationPatterns = [
-        /\/\*\*/i,
-        /\/\*\s*Test/i,
-        /\/\/\s*Test/i,
-        /\*\s*@brief/i
-    ];
-    // Function naming patterns
-    namingPatterns = [
-        /test_[a-zA-Z][a-zA-Z0-9_]*/i,
-        /[a-zA-Z][a-zA-Z0-9_]*_test/i
-    ];
-    // Board check patterns
-    boardCheckPatterns = [
-        /board\s*\.\s*match/i,
-        /#if defined\(CC13/i,
-        /#if defined\(CC26/i,
-        /#if defined\(CC23/i,
-        /#if defined\(__CC/i,
-        /if\s*\(\s*board\s*==\s*[\"\']CC/i,
-        /DEVICE_FAMILY_(CC13|CC26|CC23)/i
-    ];
-    // Hardware configuration patterns
-    hardwareConfigPatterns = [
-        /SPI\.\$hardware\s*=/i,
-        /SPI[0-9]?\.\$assign\s*=/i,
-        /GPIO\.\$hardware\s*=/i,
-        /UART\.\$hardware\s*=/i,
-        /PWM\.\$hardware\s*=/i,
-        /\.pin\.\$assign\s*=/i,
-        /\.spi\.\$assign\s*=/i,
-        /\.GPIO\.\$assign\s*=/i,
-        /pinConfigurations/i,
-        /SysConfig/i
-    ];
     /**
-     * Validates a generated test case
-     * @param testCode The test case code to validate
-     * @returns ValidationResult with score and feedback
+     * Validate a generated test case
+     * @param testCode The generated test code to validate
+     * @returns Validation result with score and suggestions
      */
     validate(testCode) {
-        // Track validation criteria
-        const criteria = {
-            hasSetup: false,
-            hasAssertions: false,
-            hasCleanup: false,
-            hasDocumentation: false,
-            hasErrorHandling: false,
-            followsNamingConventions: false
+        const result = {
+            score: 0,
+            issues: [],
+            suggestions: [],
+            tiStyleCompliance: {
+                deviceFamilyHandling: false,
+                utilityFunctions: false,
+                parameterization: false,
+                explicitTestRunner: false,
+                richAssertionMessages: false,
+                properLicenseHeader: false,
+                fullApiCoverage: false,
+            }
         };
-        // Detect if this is a board-specific test
-        const isBoardSpecific = this.detectBoardSpecificTest(testCode);
-        // If board-specific, add additional criteria
-        if (isBoardSpecific) {
-            criteria.hasBoardChecks = false;
-            criteria.hasHardwareConfig = false;
+        // Basic test structure checks
+        if (!testCode.includes("UNITY_BEGIN()")) {
+            result.issues.push("Missing UNITY_BEGIN() in test runner");
         }
-        // Check for initialization/setup
-        criteria.hasSetup = this.setupPatterns.some(pattern => pattern.test(testCode));
-        // Check for assertions
-        criteria.hasAssertions = this.assertionPatterns.some(pattern => pattern.test(testCode));
-        // Check for cleanup
-        criteria.hasCleanup = this.cleanupPatterns.some(pattern => pattern.test(testCode));
-        // Check for error handling
-        criteria.hasErrorHandling = this.errorHandlingPatterns.some(pattern => pattern.test(testCode));
-        // Check for documentation
-        criteria.hasDocumentation = this.documentationPatterns.some(pattern => pattern.test(testCode));
-        // Check for naming conventions
-        criteria.followsNamingConventions = this.namingPatterns.some(pattern => {
-            // Extract function names from the code
-            const functionMatches = testCode.match(/\w+\s+(\w+)\s*\(/g);
-            if (!functionMatches)
-                return false;
-            // Check each function name against the pattern
-            return functionMatches.some(func => {
-                const match = func.match(/\s+(\w+)\s*\(/);
-                if (!match)
-                    return false;
-                return pattern.test(match[1]);
-            });
-        });
-        // For board-specific tests, add additional checks
-        if (isBoardSpecific) {
-            // Check for board detection logic
-            criteria.hasBoardChecks = this.boardCheckPatterns.some(pattern => pattern.test(testCode));
-            // Check for hardware configuration
-            criteria.hasHardwareConfig = this.hardwareConfigPatterns.some(pattern => pattern.test(testCode));
+        if (!testCode.includes("UNITY_END()")) {
+            result.issues.push("Missing UNITY_END() in test runner");
         }
-        // Calculate score (each criterion is worth the same)
-        const criteriaCount = Object.keys(criteria).length;
-        const passedCriteria = Object.values(criteria).filter(Boolean).length;
-        const score = Math.round((passedCriteria / criteriaCount) * 100);
-        // Generate feedback and improvement suggestions
-        const feedback = [];
-        const improvementSuggestions = [];
-        // Add feedback for each criterion
-        if (criteria.hasSetup) {
-            feedback.push("✅ The test includes proper setup/initialization");
+        if (!testCode.includes("RUN_TEST(")) {
+            result.issues.push("No tests are being run with RUN_TEST()");
         }
-        else {
-            feedback.push("❌ The test is missing proper setup/initialization");
-            improvementSuggestions.push("Add initialization code using commonTestOpen() or a similar function");
+        // Check for explicit test runner function
+        const hasExplicitTestRunner = testCode.includes("int main(void)") &&
+            testCode.includes("UNITY_BEGIN()") &&
+            testCode.includes("UNITY_END()");
+        result.tiStyleCompliance.explicitTestRunner = hasExplicitTestRunner;
+        if (!hasExplicitTestRunner) {
+            result.suggestions.push("Add an explicit test runner function (main) that lists all tests");
         }
-        if (criteria.hasAssertions) {
-            feedback.push("✅ The test includes assertions");
+        // Check for Device Family handling (#if defined(DeviceFamily_...))
+        const hasDeviceFamilyHandling = testCode.includes("#if defined(DeviceFamily_") ||
+            testCode.includes("#include \"ti_drivers_config.h\"");
+        result.tiStyleCompliance.deviceFamilyHandling = hasDeviceFamilyHandling;
+        if (!hasDeviceFamilyHandling) {
+            result.suggestions.push("Add device family handling with #if defined(DeviceFamily_...) and include ti_drivers_config.h");
         }
-        else {
-            feedback.push("❌ The test is missing assertions");
-            improvementSuggestions.push("Add appropriate assertions to verify expected outcomes");
+        // Check for utility functions
+        const hasUtilityFunctions = testCode.includes("static uint32_t isSector") ||
+            (testCode.includes("static") &&
+                (testCode.includes("Helper") || testCode.includes("helper")));
+        result.tiStyleCompliance.utilityFunctions = hasUtilityFunctions;
+        if (!hasUtilityFunctions) {
+            result.suggestions.push("Add utility functions like isSectorErased() and isSectorProgrammed() to verify flash contents");
         }
-        if (criteria.hasCleanup) {
-            feedback.push("✅ The test includes proper cleanup");
+        // Check for parameterization
+        const hasParameterization = (testCode.match(/test_[a-z0-9_]+\([^)]+\)/gi) || []).length > 0;
+        result.tiStyleCompliance.parameterization = hasParameterization;
+        if (!hasParameterization) {
+            result.suggestions.push("Convert zero-arg tests to parameterized form with thin wrappers for Unity");
         }
-        else {
-            feedback.push("❌ The test is missing cleanup code");
-            improvementSuggestions.push("Add cleanup code using commonTestClose() or similar to release resources");
+        // Check for rich assertion messages
+        const assertCount = (testCode.match(/TEST_ASSERT/g) || []).length;
+        const messageAssertCount = (testCode.match(/TEST_ASSERT[^(]+_MESSAGE/g) || []).length;
+        result.tiStyleCompliance.richAssertionMessages = messageAssertCount >= assertCount * 0.7; // 70% of asserts have messages
+        if (!result.tiStyleCompliance.richAssertionMessages) {
+            result.suggestions.push("Add descriptive messages to all TEST_ASSERT calls for better debugging");
         }
-        if (criteria.hasErrorHandling) {
-            feedback.push("✅ The test includes error handling");
+        // Check for proper license header
+        const hasLicenseHeader = testCode.includes("Copyright") &&
+            (testCode.includes("* All rights reserved") ||
+                testCode.includes("* BSD") ||
+                testCode.includes("* Licensed under"));
+        result.tiStyleCompliance.properLicenseHeader = hasLicenseHeader;
+        if (!hasLicenseHeader) {
+            result.suggestions.push("Add a proper TI-style BSD license header");
         }
-        else {
-            feedback.push("❌ The test is missing error handling");
-            improvementSuggestions.push("Add error handling to gracefully handle failures");
-        }
-        if (criteria.hasDocumentation) {
-            feedback.push("✅ The test is properly documented");
-        }
-        else {
-            feedback.push("❌ The test is missing documentation");
-            improvementSuggestions.push("Add documentation comments describing the test purpose and behavior");
-        }
-        if (criteria.followsNamingConventions) {
-            feedback.push("✅ The test follows TI naming conventions");
-        }
-        else {
-            feedback.push("❌ The test doesn't follow naming conventions");
-            improvementSuggestions.push("Rename test functions to follow TI convention: test_functionName()");
-        }
-        // Add feedback for board-specific criteria if applicable
-        if (isBoardSpecific) {
-            if (criteria.hasBoardChecks) {
-                feedback.push("✅ The test includes board detection logic");
-            }
-            else {
-                feedback.push("❌ The test is missing board detection logic");
-                improvementSuggestions.push("Add board detection using #if defined() or board.match() logic");
-            }
-            if (criteria.hasHardwareConfig) {
-                feedback.push("✅ The test includes hardware configuration");
-            }
-            else {
-                feedback.push("❌ The test is missing hardware configuration");
-                improvementSuggestions.push("Add hardware configuration code for the specific board being tested");
-            }
-        }
-        return {
-            valid: score >= 70, // Consider valid if score is at least 70%
-            score,
-            feedback,
-            improvementSuggestions,
-            isBoardSpecific
-        };
-    }
-    /**
-     * Detects if a test is board-specific
-     * @param testCode The test code to check
-     * @returns True if the test appears to be board-specific
-     */
-    detectBoardSpecificTest(testCode) {
-        // Check for board-specific indicators in the code
-        const boardIndicators = [
-            /CC13/i,
-            /CC26/i,
-            /CC23/i,
-            /CC35/i,
-            /board\.match/i,
-            /LAUNCHXL/i,
-            /DEVICE_FAMILY/i,
-            /hardware configuration/i,
-            /board-specific/i,
-            /pinConfig/i,
-            /\.pin\.\$assign/i
+        // Check for full API coverage
+        const nvsFunctions = [
+            "NVS_close", "NVS_control", "NVS_erase", "NVS_getAttrs",
+            "NVS_init", "NVS_lock", "NVS_open", "NVS_Params_init",
+            "NVS_read", "NVS_unlock", "NVS_write"
         ];
-        return boardIndicators.some(pattern => pattern.test(testCode));
+        const coveredFunctions = nvsFunctions.filter(func => testCode.includes(`test_${func.toLowerCase()}`) ||
+            testCode.includes(`test_nvs_${func.split('_')[1].toLowerCase()}`));
+        const apiCoveragePercent = (coveredFunctions.length / nvsFunctions.length) * 100;
+        result.tiStyleCompliance.fullApiCoverage = apiCoveragePercent >= 80; // At least 80% of API covered
+        if (!result.tiStyleCompliance.fullApiCoverage) {
+            const missingFunctions = nvsFunctions.filter(func => !coveredFunctions.includes(func));
+            result.suggestions.push(`Increase API coverage by adding tests for: ${missingFunctions.join(', ')}`);
+        }
+        // Calculate overall score
+        const baseScore = 50; // Start with 50%
+        const tiStylePoints = Object.values(result.tiStyleCompliance).filter(Boolean).length * 7; // 7 points per compliant area
+        const issueDeduction = result.issues.length * 5; // -5 per issue
+        result.score = Math.min(100, Math.max(0, baseScore + tiStylePoints - issueDeduction));
+        return result;
     }
     /**
-     * Shows validation results in a webview panel
-     * @param result Validation result to display
-     * @param testCode Original test code
+     * Show validation results to the user
+     * @param result Validation result
+     * @param testCode The generated test code
      */
     showValidationResults(result, testCode) {
-        // Create webview panel
+        // Create a detailed message
+        const messageLines = [
+            `## Test Quality Score: ${result.score}%`,
+            '',
+            '### TI Style Compliance:',
+            `- Device Family Handling: ${result.tiStyleCompliance.deviceFamilyHandling ? '✅' : '❌'}`,
+            `- Utility Functions: ${result.tiStyleCompliance.utilityFunctions ? '✅' : '❌'}`,
+            `- Parameterization: ${result.tiStyleCompliance.parameterization ? '✅' : '❌'}`,
+            `- Explicit Test Runner: ${result.tiStyleCompliance.explicitTestRunner ? '✅' : '❌'}`,
+            `- Rich Assertion Messages: ${result.tiStyleCompliance.richAssertionMessages ? '✅' : '❌'}`,
+            `- Proper License Header: ${result.tiStyleCompliance.properLicenseHeader ? '✅' : '❌'}`,
+            `- Full API Coverage: ${result.tiStyleCompliance.fullApiCoverage ? '✅' : '❌'}`,
+        ];
+        if (result.issues.length > 0) {
+            messageLines.push('', '### Issues:');
+            result.issues.forEach(issue => messageLines.push(`- ${issue}`));
+        }
+        if (result.suggestions.length > 0) {
+            messageLines.push('', '### Suggestions to improve TI compliance:');
+            result.suggestions.forEach(suggestion => messageLines.push(`- ${suggestion}`));
+        }
+        // Show the detailed report in a markdown preview
         const panel = vscode.window.createWebviewPanel('testValidation', 'Test Validation Results', vscode.ViewColumn.Beside, { enableScripts: true });
-        // Create HTML content
-        const content = `
+        panel.webview.html = `
       <!DOCTYPE html>
-      <html lang="en">
+      <html>
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Test Validation Results</title>
         <style>
-          body { font-family: Arial, sans-serif; padding: 20px; }
-          .score { font-size: 24px; font-weight: bold; margin-bottom: 20px; }
-          .score-high { color: #4CAF50; }
-          .score-medium { color: #FF9800; }
-          .score-low { color: #F44336; }
-          .feedback-item { margin-bottom: 8px; }
-          .suggestions { margin-top: 20px; }
-          .suggestion-item { margin-bottom: 8px; color: #0277BD; }
-          .code-container { 
-            background-color: #f5f5f5; 
-            padding: 15px; 
-            margin-top: 20px;
-            border-radius: 4px;
-            overflow: auto;
-            max-height: 300px;
-          }
-          pre { margin: 0; white-space: pre-wrap; }
-          .test-type {
-            background-color: #E0E0E0;
-            padding: 8px;
-            border-radius: 4px;
-            display: inline-block;
-            margin-bottom: 15px;
-          }
-          .board-specific {
-            background-color: #BBDEFB;
-            color: #0D47A1;
-          }
+          body { font-family: system-ui, sans-serif; padding: 20px; }
+          .score { font-size: 24px; font-weight: bold; }
+          .good { color: green; }
+          .average { color: orange; }
+          .poor { color: red; }
+          .section { margin-top: 20px; }
+          h2 { border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+          li { margin-bottom: 8px; }
         </style>
       </head>
       <body>
         <h1>Test Validation Results</h1>
-        
-        ${result.isBoardSpecific ?
-            `<div class="test-type board-specific">Board-Specific Test</div>` :
-            `<div class="test-type">General Test</div>`}
-        
-        <div class="score ${result.score >= 80 ? 'score-high' :
-            result.score >= 60 ? 'score-medium' : 'score-low'}">
+        <div class="score ${result.score >= 80 ? 'good' : result.score >= 60 ? 'average' : 'poor'}">
           Score: ${result.score}%
         </div>
         
-        <h2>Feedback</h2>
-        <div class="feedback">
-          ${result.feedback.map(item => `<div class="feedback-item">${item}</div>`).join('')}
+        <div class="section">
+          <h2>TI Style Compliance</h2>
+          <ul>
+            <li>Device Family Handling: ${result.tiStyleCompliance.deviceFamilyHandling ? '✅' : '❌'}</li>
+            <li>Utility Functions: ${result.tiStyleCompliance.utilityFunctions ? '✅' : '❌'}</li>
+            <li>Parameterization: ${result.tiStyleCompliance.parameterization ? '✅' : '❌'}</li>
+            <li>Explicit Test Runner: ${result.tiStyleCompliance.explicitTestRunner ? '✅' : '❌'}</li>
+            <li>Rich Assertion Messages: ${result.tiStyleCompliance.richAssertionMessages ? '✅' : '❌'}</li>
+            <li>Proper License Header: ${result.tiStyleCompliance.properLicenseHeader ? '✅' : '❌'}</li>
+            <li>Full API Coverage: ${result.tiStyleCompliance.fullApiCoverage ? '✅' : '❌'}</li>
+          </ul>
         </div>
         
-        ${result.improvementSuggestions.length > 0 ? `
-          <h2>Improvement Suggestions</h2>
-          <div class="suggestions">
-            ${result.improvementSuggestions.map(item => `<div class="suggestion-item">• ${item}</div>`).join('')}
-          </div>
+        ${result.issues.length > 0 ? `
+        <div class="section">
+          <h2>Issues</h2>
+          <ul>
+            ${result.issues.map(issue => `<li>${issue}</li>`).join('')}
+          </ul>
+        </div>
         ` : ''}
         
-        <h2>Test Code</h2>
-        <div class="code-container">
-          <pre><code>${this.escapeHtml(testCode)}</code></pre>
+        ${result.suggestions.length > 0 ? `
+        <div class="section">
+          <h2>Suggestions to improve TI compliance</h2>
+          <ul>
+            ${result.suggestions.map(suggestion => `<li>${suggestion}</li>`).join('')}
+          </ul>
         </div>
+        ` : ''}
       </body>
       </html>
     `;
-        // Set HTML content
-        panel.webview.html = content;
-    }
-    /**
-     * Escape HTML to prevent XSS in webview
-     */
-    escapeHtml(text) {
-        return text
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
     }
 }
 exports.TestCaseValidator = TestCaseValidator;

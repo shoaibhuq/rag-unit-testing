@@ -38,40 +38,52 @@ async function processAllConfigs(): Promise<void> {
       console.log(`Processing ${driverName} configuration...`);
       
       const filePath = path.join(PROJECT_CONFIGS_DIR, file);
-      const config = await parseProjectConfig(filePath);
       
-      // Extract test case metadata
-      const testCaseMetadata = extractTestCaseMetadata(config, driverName);
-      
-      // Create driver metadata
-      const driverMetadata: DriverMetadata = {
-        name: driverName,
-        boardSupport: config.boards,
-        osSupport: config.supportedOS,
-        testCases: testCaseMetadata.map((tc, idx) => 
-          `${driverName}_${tc.testType}_${idx}`
-        ),
-        sourceFiles: getAllSourceFiles(config),
-      };
-      
-      // Save driver metadata
-      await saveMetadata(
-        driverMetadata, 
-        path.join(DRIVER_METADATA_DIR, `${driverName}.json`)
-      );
-      
-      // Save test case metadata
-      for (let i = 0; i < testCaseMetadata.length; i++) {
-        const tc = testCaseMetadata[i];
-        const testCaseName = `${driverName}_${tc.testType}_${i}`;
+      try {
+        const config = await parseProjectConfig(filePath);
         
+        // Skip empty configurations
+        if (!config || Object.keys(config).length === 0) {
+          console.warn(`Warning: Empty configuration for ${driverName}, skipping...`);
+          continue;
+        }
+        
+        // Extract test case metadata
+        const testCaseMetadata = extractTestCaseMetadata(config, driverName);
+        
+        // Create driver metadata
+        const driverMetadata: DriverMetadata = {
+          name: driverName,
+          boardSupport: config.boards || [],
+          osSupport: config.supportedOS || [],
+          testCases: testCaseMetadata.map((tc, idx) => 
+            `${driverName}_${tc.testType}_${idx}`
+          ),
+          sourceFiles: getAllSourceFiles(config),
+        };
+        
+        // Save driver metadata
         await saveMetadata(
-          tc,
-          path.join(TEST_CASE_METADATA_DIR, `${testCaseName}.json`)
+          driverMetadata, 
+          path.join(DRIVER_METADATA_DIR, `${driverName}.json`)
         );
+        
+        // Save test case metadata
+        for (let i = 0; i < testCaseMetadata.length; i++) {
+          const tc = testCaseMetadata[i];
+          const testCaseName = `${driverName}_${tc.testType}_${i}`;
+          
+          await saveMetadata(
+            tc,
+            path.join(TEST_CASE_METADATA_DIR, `${testCaseName}.json`)
+          );
+        }
+        
+        console.log(`✅ Processed ${driverName} configuration`);
+      } catch (error) {
+        console.error(`Error processing ${driverName} configuration:`, error);
+        // Continue with the next file
       }
-      
-      console.log(`✅ Processed ${driverName} configuration`);
     }
     
     console.log('All configurations processed successfully');
@@ -88,6 +100,11 @@ async function processAllConfigs(): Promise<void> {
 function getAllSourceFiles(config: ProjectConfig): string[] {
   const sourceFiles: string[] = [];
   const addedFiles = new Set<string>();
+  
+  // Return empty array if fileLists doesn't exist
+  if (!config.fileLists) {
+    return sourceFiles;
+  }
   
   for (const key in config.fileLists) {
     if (config.fileLists[key]) {

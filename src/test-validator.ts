@@ -1,303 +1,176 @@
 import * as vscode from "vscode";
 
-interface ValidationResult {
-  valid: boolean;
+/**
+ * Test Case Validation Result
+ */
+export interface ValidationResult {
   score: number;
-  feedback: string[];
-  improvementSuggestions: string[];
-  isBoardSpecific?: boolean;
-}
-
-interface ValidationCriteria {
-  hasSetup: boolean;
-  hasAssertions: boolean;
-  hasCleanup: boolean;
-  hasDocumentation: boolean;
-  hasErrorHandling: boolean;
-  followsNamingConventions: boolean;
-  hasBoardChecks?: boolean;
-  hasHardwareConfig?: boolean;
+  issues: string[];
+  suggestions: string[];
+  tiStyleCompliance: {
+    deviceFamilyHandling: boolean;
+    utilityFunctions: boolean;
+    parameterization: boolean;
+    explicitTestRunner: boolean;
+    richAssertionMessages: boolean;
+    properLicenseHeader: boolean;
+    fullApiCoverage: boolean;
+  };
 }
 
 /**
- * Validates test cases against TI best practices
+ * Test Case Validator
+ * Validates generated test cases against best practices
  */
 export class TestCaseValidator {
-  // Initialization patterns
-  private setupPatterns = [
-    /commonTestOpen/i,
-    /setUp/i,
-    /initialize/i,
-    /init.*Test/i
-  ];
-
-  // Assertion patterns
-  private assertionPatterns = [
-    /assert/i,
-    /TEST_ASSERT/i,
-    /EXPECT_/i,
-    /verify/i,
-    /check/i
-  ];
-
-  // Cleanup patterns
-  private cleanupPatterns = [
-    /commonTestClose/i,
-    /tearDown/i,
-    /cleanup/i,
-    /finalize/i,
-    /free/i
-  ];
-
-  // Error handling patterns
-  private errorHandlingPatterns = [
-    /if\s*\(.*error/i,
-    /try\s*{/i,
-    /catch\s*\(/i,
-    /return.*error/i
-  ];
-
-  // Documentation patterns
-  private documentationPatterns = [
-    /\/\*\*/i,
-    /\/\*\s*Test/i,
-    /\/\/\s*Test/i,
-    /\*\s*@brief/i
-  ];
-
-  // Function naming patterns
-  private namingPatterns = [
-    /test_[a-zA-Z][a-zA-Z0-9_]*/i,
-    /[a-zA-Z][a-zA-Z0-9_]*_test/i
-  ];
-  
-  // Board check patterns
-  private boardCheckPatterns = [
-    /board\s*\.\s*match/i,
-    /#if defined\(CC13/i,
-    /#if defined\(CC26/i,
-    /#if defined\(CC23/i,
-    /#if defined\(__CC/i,
-    /if\s*\(\s*board\s*==\s*[\"\']CC/i,
-    /DEVICE_FAMILY_(CC13|CC26|CC23)/i
-  ];
-  
-  // Hardware configuration patterns
-  private hardwareConfigPatterns = [
-    /SPI\.\$hardware\s*=/i,
-    /SPI[0-9]?\.\$assign\s*=/i,
-    /GPIO\.\$hardware\s*=/i,
-    /UART\.\$hardware\s*=/i,
-    /PWM\.\$hardware\s*=/i,
-    /\.pin\.\$assign\s*=/i,
-    /\.spi\.\$assign\s*=/i,
-    /\.GPIO\.\$assign\s*=/i,
-    /pinConfigurations/i,
-    /SysConfig/i
-  ];
-
   /**
-   * Validates a generated test case
-   * @param testCode The test case code to validate
-   * @returns ValidationResult with score and feedback
+   * Validate a generated test case
+   * @param testCode The generated test code to validate
+   * @returns Validation result with score and suggestions
    */
   validate(testCode: string): ValidationResult {
-    // Track validation criteria
-    const criteria: ValidationCriteria = {
-      hasSetup: false,
-      hasAssertions: false,
-      hasCleanup: false,
-      hasDocumentation: false,
-      hasErrorHandling: false,
-      followsNamingConventions: false
-    };
-    
-    // Detect if this is a board-specific test
-    const isBoardSpecific = this.detectBoardSpecificTest(testCode);
-    
-    // If board-specific, add additional criteria
-    if (isBoardSpecific) {
-      criteria.hasBoardChecks = false;
-      criteria.hasHardwareConfig = false;
-    }
-
-    // Check for initialization/setup
-    criteria.hasSetup = this.setupPatterns.some(pattern => 
-      pattern.test(testCode)
-    );
-
-    // Check for assertions
-    criteria.hasAssertions = this.assertionPatterns.some(pattern => 
-      pattern.test(testCode)
-    );
-
-    // Check for cleanup
-    criteria.hasCleanup = this.cleanupPatterns.some(pattern => 
-      pattern.test(testCode)
-    );
-
-    // Check for error handling
-    criteria.hasErrorHandling = this.errorHandlingPatterns.some(pattern => 
-      pattern.test(testCode)
-    );
-
-    // Check for documentation
-    criteria.hasDocumentation = this.documentationPatterns.some(pattern => 
-      pattern.test(testCode)
-    );
-
-    // Check for naming conventions
-    criteria.followsNamingConventions = this.namingPatterns.some(pattern => {
-      // Extract function names from the code
-      const functionMatches = testCode.match(/\w+\s+(\w+)\s*\(/g);
-      if (!functionMatches) return false;
-      
-      // Check each function name against the pattern
-      return functionMatches.some(func => {
-        const match = func.match(/\s+(\w+)\s*\(/);
-        if (!match) return false;
-        return pattern.test(match[1]);
-      });
-    });
-    
-    // For board-specific tests, add additional checks
-    if (isBoardSpecific) {
-      // Check for board detection logic
-      criteria.hasBoardChecks = this.boardCheckPatterns.some(pattern => 
-        pattern.test(testCode)
-      );
-      
-      // Check for hardware configuration
-      criteria.hasHardwareConfig = this.hardwareConfigPatterns.some(pattern => 
-        pattern.test(testCode)
-      );
-    }
-
-    // Calculate score (each criterion is worth the same)
-    const criteriaCount = Object.keys(criteria).length;
-    const passedCriteria = Object.values(criteria).filter(Boolean).length;
-    const score = Math.round((passedCriteria / criteriaCount) * 100);
-
-    // Generate feedback and improvement suggestions
-    const feedback: string[] = [];
-    const improvementSuggestions: string[] = [];
-
-    // Add feedback for each criterion
-    if (criteria.hasSetup) {
-      feedback.push("✅ The test includes proper setup/initialization");
-    } else {
-      feedback.push("❌ The test is missing proper setup/initialization");
-      improvementSuggestions.push(
-        "Add initialization code using commonTestOpen() or a similar function"
-      );
-    }
-
-    if (criteria.hasAssertions) {
-      feedback.push("✅ The test includes assertions");
-    } else {
-      feedback.push("❌ The test is missing assertions");
-      improvementSuggestions.push(
-        "Add appropriate assertions to verify expected outcomes"
-      );
-    }
-
-    if (criteria.hasCleanup) {
-      feedback.push("✅ The test includes proper cleanup");
-    } else {
-      feedback.push("❌ The test is missing cleanup code");
-      improvementSuggestions.push(
-        "Add cleanup code using commonTestClose() or similar to release resources"
-      );
-    }
-
-    if (criteria.hasErrorHandling) {
-      feedback.push("✅ The test includes error handling");
-    } else {
-      feedback.push("❌ The test is missing error handling");
-      improvementSuggestions.push(
-        "Add error handling to gracefully handle failures"
-      );
-    }
-
-    if (criteria.hasDocumentation) {
-      feedback.push("✅ The test is properly documented");
-    } else {
-      feedback.push("❌ The test is missing documentation");
-      improvementSuggestions.push(
-        "Add documentation comments describing the test purpose and behavior"
-      );
-    }
-
-    if (criteria.followsNamingConventions) {
-      feedback.push("✅ The test follows TI naming conventions");
-    } else {
-      feedback.push("❌ The test doesn't follow naming conventions");
-      improvementSuggestions.push(
-        "Rename test functions to follow TI convention: test_functionName()"
-      );
-    }
-    
-    // Add feedback for board-specific criteria if applicable
-    if (isBoardSpecific) {
-      if (criteria.hasBoardChecks) {
-        feedback.push("✅ The test includes board detection logic");
-      } else {
-        feedback.push("❌ The test is missing board detection logic");
-        improvementSuggestions.push(
-          "Add board detection using #if defined() or board.match() logic"
-        );
+    const result: ValidationResult = {
+      score: 0,
+      issues: [],
+      suggestions: [],
+      tiStyleCompliance: {
+        deviceFamilyHandling: false,
+        utilityFunctions: false,
+        parameterization: false,
+        explicitTestRunner: false,
+        richAssertionMessages: false,
+        properLicenseHeader: false,
+        fullApiCoverage: false,
       }
-      
-      if (criteria.hasHardwareConfig) {
-        feedback.push("✅ The test includes hardware configuration");
-      } else {
-        feedback.push("❌ The test is missing hardware configuration");
-        improvementSuggestions.push(
-          "Add hardware configuration code for the specific board being tested"
-        );
-      }
+    };
+
+    // Basic test structure checks
+    if (!testCode.includes("UNITY_BEGIN()")) {
+      result.issues.push("Missing UNITY_BEGIN() in test runner");
     }
 
-    return {
-      valid: score >= 70, // Consider valid if score is at least 70%
-      score,
-      feedback,
-      improvementSuggestions,
-      isBoardSpecific
-    };
-  }
-  
-  /**
-   * Detects if a test is board-specific
-   * @param testCode The test code to check
-   * @returns True if the test appears to be board-specific
-   */
-  private detectBoardSpecificTest(testCode: string): boolean {
-    // Check for board-specific indicators in the code
-    const boardIndicators = [
-      /CC13/i,
-      /CC26/i,
-      /CC23/i,
-      /CC35/i,
-      /board\.match/i,
-      /LAUNCHXL/i,
-      /DEVICE_FAMILY/i,
-      /hardware configuration/i,
-      /board-specific/i,
-      /pinConfig/i,
-      /\.pin\.\$assign/i
+    if (!testCode.includes("UNITY_END()")) {
+      result.issues.push("Missing UNITY_END() in test runner");
+    }
+
+    if (!testCode.includes("RUN_TEST(")) {
+      result.issues.push("No tests are being run with RUN_TEST()");
+    }
+
+    // Check for explicit test runner function
+    const hasExplicitTestRunner = testCode.includes("int main(void)") && 
+                                  testCode.includes("UNITY_BEGIN()") && 
+                                  testCode.includes("UNITY_END()");
+    result.tiStyleCompliance.explicitTestRunner = hasExplicitTestRunner;
+    if (!hasExplicitTestRunner) {
+      result.suggestions.push("Add an explicit test runner function (main) that lists all tests");
+    }
+
+    // Check for Device Family handling (#if defined(DeviceFamily_...))
+    const hasDeviceFamilyHandling = testCode.includes("#if defined(DeviceFamily_") || 
+                                  testCode.includes("#include \"ti_drivers_config.h\"");
+    result.tiStyleCompliance.deviceFamilyHandling = hasDeviceFamilyHandling;
+    if (!hasDeviceFamilyHandling) {
+      result.suggestions.push("Add device family handling with #if defined(DeviceFamily_...) and include ti_drivers_config.h");
+    }
+
+    // Check for utility functions
+    const hasUtilityFunctions = testCode.includes("static uint32_t isSector") ||
+                              (testCode.includes("static") && 
+                               (testCode.includes("Helper") || testCode.includes("helper")));
+    result.tiStyleCompliance.utilityFunctions = hasUtilityFunctions;
+    if (!hasUtilityFunctions) {
+      result.suggestions.push("Add utility functions like isSectorErased() and isSectorProgrammed() to verify flash contents");
+    }
+
+    // Check for parameterization
+    const hasParameterization = (testCode.match(/test_[a-z0-9_]+\([^)]+\)/gi) || []).length > 0;
+    result.tiStyleCompliance.parameterization = hasParameterization;
+    if (!hasParameterization) {
+      result.suggestions.push("Convert zero-arg tests to parameterized form with thin wrappers for Unity");
+    }
+
+    // Check for rich assertion messages
+    const assertCount = (testCode.match(/TEST_ASSERT/g) || []).length;
+    const messageAssertCount = (testCode.match(/TEST_ASSERT[^(]+_MESSAGE/g) || []).length;
+    result.tiStyleCompliance.richAssertionMessages = messageAssertCount >= assertCount * 0.7; // 70% of asserts have messages
+    if (!result.tiStyleCompliance.richAssertionMessages) {
+      result.suggestions.push("Add descriptive messages to all TEST_ASSERT calls for better debugging");
+    }
+
+    // Check for proper license header
+    const hasLicenseHeader = testCode.includes("Copyright") && 
+                           (testCode.includes("* All rights reserved") || 
+                            testCode.includes("* BSD") || 
+                            testCode.includes("* Licensed under"));
+    result.tiStyleCompliance.properLicenseHeader = hasLicenseHeader;
+    if (!hasLicenseHeader) {
+      result.suggestions.push("Add a proper TI-style BSD license header");
+    }
+
+    // Check for full API coverage
+    const nvsFunctions = [
+      "NVS_close", "NVS_control", "NVS_erase", "NVS_getAttrs", 
+      "NVS_init", "NVS_lock", "NVS_open", "NVS_Params_init", 
+      "NVS_read", "NVS_unlock", "NVS_write"
     ];
     
-    return boardIndicators.some(pattern => pattern.test(testCode));
+    const coveredFunctions = nvsFunctions.filter(func => 
+      testCode.includes(`test_${func.toLowerCase()}`) || 
+      testCode.includes(`test_nvs_${func.split('_')[1].toLowerCase()}`)
+    );
+    
+    const apiCoveragePercent = (coveredFunctions.length / nvsFunctions.length) * 100;
+    result.tiStyleCompliance.fullApiCoverage = apiCoveragePercent >= 80; // At least 80% of API covered
+    
+    if (!result.tiStyleCompliance.fullApiCoverage) {
+      const missingFunctions = nvsFunctions.filter(func => 
+        !coveredFunctions.includes(func)
+      );
+      result.suggestions.push(`Increase API coverage by adding tests for: ${missingFunctions.join(', ')}`);
+    }
+
+    // Calculate overall score
+    const baseScore = 50; // Start with 50%
+    const tiStylePoints = Object.values(result.tiStyleCompliance).filter(Boolean).length * 7; // 7 points per compliant area
+    const issueDeduction = result.issues.length * 5; // -5 per issue
+    
+    result.score = Math.min(100, Math.max(0, baseScore + tiStylePoints - issueDeduction));
+
+    return result;
   }
 
   /**
-   * Shows validation results in a webview panel
-   * @param result Validation result to display
-   * @param testCode Original test code
+   * Show validation results to the user
+   * @param result Validation result
+   * @param testCode The generated test code
    */
   showValidationResults(result: ValidationResult, testCode: string): void {
-    // Create webview panel
+    // Create a detailed message
+    const messageLines = [
+      `## Test Quality Score: ${result.score}%`,
+      '',
+      '### TI Style Compliance:',
+      `- Device Family Handling: ${result.tiStyleCompliance.deviceFamilyHandling ? '✅' : '❌'}`,
+      `- Utility Functions: ${result.tiStyleCompliance.utilityFunctions ? '✅' : '❌'}`,
+      `- Parameterization: ${result.tiStyleCompliance.parameterization ? '✅' : '❌'}`,
+      `- Explicit Test Runner: ${result.tiStyleCompliance.explicitTestRunner ? '✅' : '❌'}`,
+      `- Rich Assertion Messages: ${result.tiStyleCompliance.richAssertionMessages ? '✅' : '❌'}`,
+      `- Proper License Header: ${result.tiStyleCompliance.properLicenseHeader ? '✅' : '❌'}`,
+      `- Full API Coverage: ${result.tiStyleCompliance.fullApiCoverage ? '✅' : '❌'}`,
+    ];
+
+    if (result.issues.length > 0) {
+      messageLines.push('', '### Issues:');
+      result.issues.forEach(issue => messageLines.push(`- ${issue}`));
+    }
+
+    if (result.suggestions.length > 0) {
+      messageLines.push('', '### Suggestions to improve TI compliance:');
+      result.suggestions.forEach(suggestion => messageLines.push(`- ${suggestion}`));
+    }
+
+    // Show the detailed report in a markdown preview
     const panel = vscode.window.createWebviewPanel(
       'testValidation',
       'Test Validation Results',
@@ -305,96 +178,61 @@ export class TestCaseValidator {
       { enableScripts: true }
     );
 
-    // Create HTML content
-    const content = `
+    panel.webview.html = `
       <!DOCTYPE html>
-      <html lang="en">
+      <html>
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Test Validation Results</title>
         <style>
-          body { font-family: Arial, sans-serif; padding: 20px; }
-          .score { font-size: 24px; font-weight: bold; margin-bottom: 20px; }
-          .score-high { color: #4CAF50; }
-          .score-medium { color: #FF9800; }
-          .score-low { color: #F44336; }
-          .feedback-item { margin-bottom: 8px; }
-          .suggestions { margin-top: 20px; }
-          .suggestion-item { margin-bottom: 8px; color: #0277BD; }
-          .code-container { 
-            background-color: #f5f5f5; 
-            padding: 15px; 
-            margin-top: 20px;
-            border-radius: 4px;
-            overflow: auto;
-            max-height: 300px;
-          }
-          pre { margin: 0; white-space: pre-wrap; }
-          .test-type {
-            background-color: #E0E0E0;
-            padding: 8px;
-            border-radius: 4px;
-            display: inline-block;
-            margin-bottom: 15px;
-          }
-          .board-specific {
-            background-color: #BBDEFB;
-            color: #0D47A1;
-          }
+          body { font-family: system-ui, sans-serif; padding: 20px; }
+          .score { font-size: 24px; font-weight: bold; }
+          .good { color: green; }
+          .average { color: orange; }
+          .poor { color: red; }
+          .section { margin-top: 20px; }
+          h2 { border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+          li { margin-bottom: 8px; }
         </style>
       </head>
       <body>
         <h1>Test Validation Results</h1>
-        
-        ${result.isBoardSpecific ? 
-          `<div class="test-type board-specific">Board-Specific Test</div>` : 
-          `<div class="test-type">General Test</div>`}
-        
-        <div class="score ${
-          result.score >= 80 ? 'score-high' : 
-          result.score >= 60 ? 'score-medium' : 'score-low'
-        }">
+        <div class="score ${result.score >= 80 ? 'good' : result.score >= 60 ? 'average' : 'poor'}">
           Score: ${result.score}%
         </div>
         
-        <h2>Feedback</h2>
-        <div class="feedback">
-          ${result.feedback.map(item => 
-            `<div class="feedback-item">${item}</div>`
-          ).join('')}
+        <div class="section">
+          <h2>TI Style Compliance</h2>
+          <ul>
+            <li>Device Family Handling: ${result.tiStyleCompliance.deviceFamilyHandling ? '✅' : '❌'}</li>
+            <li>Utility Functions: ${result.tiStyleCompliance.utilityFunctions ? '✅' : '❌'}</li>
+            <li>Parameterization: ${result.tiStyleCompliance.parameterization ? '✅' : '❌'}</li>
+            <li>Explicit Test Runner: ${result.tiStyleCompliance.explicitTestRunner ? '✅' : '❌'}</li>
+            <li>Rich Assertion Messages: ${result.tiStyleCompliance.richAssertionMessages ? '✅' : '❌'}</li>
+            <li>Proper License Header: ${result.tiStyleCompliance.properLicenseHeader ? '✅' : '❌'}</li>
+            <li>Full API Coverage: ${result.tiStyleCompliance.fullApiCoverage ? '✅' : '❌'}</li>
+          </ul>
         </div>
         
-        ${result.improvementSuggestions.length > 0 ? `
-          <h2>Improvement Suggestions</h2>
-          <div class="suggestions">
-            ${result.improvementSuggestions.map(item => 
-              `<div class="suggestion-item">• ${item}</div>`
-            ).join('')}
-          </div>
+        ${result.issues.length > 0 ? `
+        <div class="section">
+          <h2>Issues</h2>
+          <ul>
+            ${result.issues.map(issue => `<li>${issue}</li>`).join('')}
+          </ul>
+        </div>
         ` : ''}
         
-        <h2>Test Code</h2>
-        <div class="code-container">
-          <pre><code>${this.escapeHtml(testCode)}</code></pre>
+        ${result.suggestions.length > 0 ? `
+        <div class="section">
+          <h2>Suggestions to improve TI compliance</h2>
+          <ul>
+            ${result.suggestions.map(suggestion => `<li>${suggestion}</li>`).join('')}
+          </ul>
         </div>
+        ` : ''}
       </body>
       </html>
     `;
-
-    // Set HTML content
-    panel.webview.html = content;
-  }
-
-  /**
-   * Escape HTML to prevent XSS in webview
-   */
-  private escapeHtml(text: string): string {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
   }
 } 
