@@ -1,0 +1,18 @@
+{
+    tools: [ gcc, iar, llvm ],
+    supportedOS: [freertos, nortos ],
+    boards: [
+        all_cc27xx,
+    ],
+
+    fileLists: {
+        all: [
+            { path: "[TEST]/src/apu.syscfg", },
+        ],
+        all_cc27xx: {
+            all: [
+                { path: "[TEST]/src/testcases_apu_general.c" },
+            ],
+        },
+    }
+}

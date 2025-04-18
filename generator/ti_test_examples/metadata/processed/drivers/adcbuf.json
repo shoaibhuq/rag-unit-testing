@@ -1,0 +1,21 @@
+{
+  "name": "adcbuf",
+  "boardSupport": [
+    "all_cc23x0r5",
+    "all_cc27xx"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "testCases": [
+    "adcbuf_general_0"
+  ],
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/ADCBuf.c",
+    "[DRIVERS]/source/ti/drivers/adcbuf/ADCBufCC26XX.c",
+    "[DRIVERS]/source/ti/drivers/adcbuf/ADCBufLPF3.c",
+    "[DRIVERS]/source/ti/drivers/adc/ADCLPF3.c"
+  ]
+}

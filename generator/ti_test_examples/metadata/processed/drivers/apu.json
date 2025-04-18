@@ -1,0 +1,14 @@
+{
+  "name": "apu",
+  "boardSupport": [
+    "all_cc27xx"
+  ],
+  "osSupport": [
+    "freertos",
+    "nortos"
+  ],
+  "testCases": [
+    "apu_board_specific_0"
+  ],
+  "sourceFiles": []
+}

@@ -1,0 +1,37 @@
+{
+  "driver": "adc",
+  "testType": "general",
+  "boardSupport": [
+    "all_cc13xx_cc26xx",
+    "all_cc23x0r5",
+    "all_cc27xx"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "toolchain": [
+    "gcc",
+    "iar",
+    "llvm"
+  ],
+  "dependencies": [
+    "[DRIVERS]/source/ti/drivers/ADC.c"
+  ],
+  "testFiles": {
+    "c": [
+      "[TEST]/src/testcase_adc_general.c"
+    ],
+    "h": [],
+    "py": [],
+    "syscfg": [
+      "[TEST]/src/adc.syscfg"
+    ]
+  },
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/ADC.c"
+  ],
+  "created": "2025-04-11T16:40:25.563Z",
+  "updated": "2025-04-11T16:40:25.564Z"
+}

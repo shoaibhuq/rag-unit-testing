@@ -1,0 +1,35 @@
+{
+    tools: [ gcc, iar, llvm ],
+    supportedOS: [ tirtos7, freertos, nortos ],
+    boards: [
+        all_cc23xx,
+        all_cc27xx,
+    ],
+
+    configurations: [
+        'standard',
+        {
+            name: 'tfm_enabled',
+            boards: [all_cc27xx],
+        },
+    ],
+
+    fileLists: {
+        all: [
+            { path: "[TEST]/src/batterymonitor.syscfg" },
+            { path: "[TEST]/src/testcase_batterymonitor.c" },
+        ],
+        ~tfm_enabled: [
+            { path: "[TEST]/src/batterymonitor.syscfg" },
+        ],
+        tfm_enabled: [
+            { path: "[TEST]/src/batterymonitor_ns.syscfg" },
+        ],
+        all_lpf3: [
+            { path: "[TEST]/src/testcase_batterymonitor_lpf3.c" },
+            { path: "[DRIVERS]/source/ti/drivers/temperature/TemperatureLPF3.c", targetDirectory: drivers, coverage: false },
+            { path: "[DRIVERS]/source/ti/drivers/batterymonitor/BatteryMonitorLPF3.c", targetDirectory: drivers, coverage: true },
+            { path: "[DRIVERS]/source/ti/drivers/batterymonitor/BatMonSupportLPF3.c", targetDirectory: drivers, coverage: true },
+        ],
+    },
+}

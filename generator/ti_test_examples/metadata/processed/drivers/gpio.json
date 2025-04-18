@@ -1,0 +1,26 @@
+{
+  "name": "gpio",
+  "boardSupport": [
+    "all_lpf3",
+    "all_cc13xx_cc26xx",
+    "all_cc35xx"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "testCases": [
+    "gpio_general_0",
+    "gpio_board_specific_1",
+    "gpio_board_specific_2"
+  ],
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/GPIO.c",
+    "[DRIVERS]/source/ti/drivers/gpio/GPIOCC26XX.c",
+    "[DRIVERS]/source/ti/drivers/gpio/GPIOCC26X4.c",
+    "[DRIVERS]/source/ti/drivers/gpio/GPIOCC26X2.c",
+    "[DRIVERS]/source/ti/drivers/gpio/GPIOLPF3.c",
+    "[DRIVERS]/source/ti/drivers/gpio/GPIOWFF3.c"
+  ]
+}

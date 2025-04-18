@@ -1,0 +1,28 @@
+{
+    tools: [ gcc, iar, llvm ],
+    supportedOS: [ tirtos7, freertos, nortos ],
+    boards: [
+        all_cc13xx_cc26xx,
+        all_lpf3,
+        all_wff3,
+    ],
+
+    fileLists: {
+        all: [
+            { path: "[TEST]/src/testcases.c" },
+            { path: "[TEST]/src/button.syscfg", },
+
+            { path: "[DRIVERS]/source/ti/drivers/GPIO.c" },
+            { path: "[DRIVERS]/source/ti/drivers/apps/Button.c", coverage: true },
+        ],
+        all_cc13xx_cc26xx: [
+            { path: "[DRIVERS]/source/ti/drivers/gpio/GPIOCC26XX.c" }
+        ],
+        all_lpf3: [
+            { path: "[DRIVERS]/source/ti/drivers/gpio/GPIOLPF3.c" }
+        ],
+        all_wff3: [
+            { path: "[DRIVERS]/source/ti/drivers/gpio/GPIOWFF3.c" }
+        ],
+    }
+}

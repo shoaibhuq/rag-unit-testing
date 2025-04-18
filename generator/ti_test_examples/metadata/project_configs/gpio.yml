@@ -1,0 +1,50 @@
+{
+    tools: [ gcc, iar, llvm ],
+    supportedOS: [ tirtos7, freertos, nortos ],
+    boards: [
+        all_lpf3,
+        all_cc13xx_cc26xx,
+        all_cc35xx,
+    ],
+
+    configurations: [
+        'standard',
+        {
+            name: 'tfm_enabled',
+            boards: [all_cc27xx],
+        },
+    ],
+
+    fileLists: {
+        all: [
+            { path: "[TEST]/src/testcases.c" },
+
+            { path: "[DRIVERS]/source/ti/drivers/GPIO.c", coverage: true },
+        ],
+        ~tfm_enabled: [
+            { path: "[TEST]/src/gpio.syscfg", },
+        ],
+        tfm_enabled: [
+            { path: "[TEST]/src/gpio_ns.syscfg", },
+        ],
+        all_cc13xx_cc26xx: {
+            all: [
+                { path: "[TEST]/src/testcases_cc26xx.c" },
+                { path: "[DRIVERS]/source/ti/drivers/gpio/GPIOCC26XX.c", coverage: true },
+            ],
+            all_cc13x4_cc26x4: [
+                { path: "[DRIVERS]/source/ti/drivers/gpio/GPIOCC26X4.c", coverage: true },
+            ],
+            ~all_cc13x4_cc26x4: [
+                { path: "[DRIVERS]/source/ti/drivers/gpio/GPIOCC26X2.c", coverage: true },
+            ],
+        },
+        all_lpf3: [
+            { path: "[TEST]/src/testcases_cc26xx.c" },
+            { path: "[DRIVERS]/source/ti/drivers/gpio/GPIOLPF3.c", coverage: true },
+        ],
+        all_cc35xx: [
+            { path: "[DRIVERS]/source/ti/drivers/gpio/GPIOWFF3.c", coverage: true },
+        ],
+    }
+}

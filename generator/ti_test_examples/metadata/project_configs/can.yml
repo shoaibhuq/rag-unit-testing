@@ -1,0 +1,53 @@
+{
+    tools: [ gcc, iar, llvm ],
+    supportedOS: [ tirtos7, freertos ],
+    boards: [
+        all_cc13x1_cc26x1,
+        all_cc13x2_cc26x2,
+        all_cc23x0,
+        all_cc27xx
+    ],
+
+    invalidPermutations: [
+        "lp_em_cc2340r53_wcsp", # CC2340R53 WCSP has limited IOs and the available pins cannot be mapped to TCAN4550 BP
+        "lp_em_cc2340r5_q1",    # CC2340R5-Q1 LP has SPI CS pin in a different location than the TCAN4550 BP
+    ],
+
+    configurations: [
+        'standard',
+        {
+            name: 'tfm_enabled',
+            boards: [all_cc27xx],
+        },
+    ],
+
+    fileLists: {
+        all: [
+            # Top-level drivers
+            { path: "[DRIVERS]/source/ti/drivers/CAN.c", targetDirectory: drivers, coverage: true },
+            { path: "[DRIVERS]/source/ti/drivers/can/common/CANMCAN.c", targetDirectory: drivers, coverage: true },
+            { path: "[DRIVERS]/source/third_party/mcan/MCAN.c", targetDirectory: mcan, coverage: true },
+
+            # Test source file
+            { path: "[TEST]/src/testcase_can.c" },
+        ],
+        ~tfm_enabled: [
+            # Sysconfig file
+            { path: "[TEST]/src/can.syscfg" },
+        ],
+        tfm_enabled: [
+            # Sysconfig file
+            { path: "[TEST]/src/can_ns.syscfg" },
+        ],
+        # Device-specific drivers
+        all_cc13x1_cc26x1: [
+            { path: "[DRIVERS]/source/ti/drivers/can/TCAN455X.c", targetDirectory: drivers, coverage: true },
+        ],
+        all_cc13x2_cc26x2: [
+            { path: "[DRIVERS]/source/ti/drivers/can/TCAN455X.c", targetDirectory: drivers, coverage: true },
+        ],
+        all_cc27xx: [
+            { path: "[DRIVERS]/source/ti/drivers/can/CANCC27XX.c", targetDirectory: drivers, coverage: true },
+        ],
+    },
+}

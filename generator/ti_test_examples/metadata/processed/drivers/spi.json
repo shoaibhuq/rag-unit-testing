@@ -1,0 +1,29 @@
+{
+  "name": "spi",
+  "boardSupport": [
+    "all_cc13xx_cc26xx",
+    "all_cc13x4_cc26x4",
+    "all_lpf3",
+    "all_wff3"
+  ],
+  "osSupport": [
+    "tirtos7",
+    "freertos",
+    "nortos"
+  ],
+  "testCases": [
+    "spi_general_0",
+    "spi_board_specific_1",
+    "spi_board_specific_2",
+    "spi_board_specific_3",
+    "spi_board_specific_4",
+    "spi_board_specific_5"
+  ],
+  "sourceFiles": [
+    "[DRIVERS]/source/ti/drivers/SPI.c",
+    "[DRIVERS]/source/ti/drivers/spi/SPICC26X2DMA.c",
+    "[DRIVERS]/source/ti/drivers/spi/SPICC26X4DMA.c",
+    "[DRIVERS]/source/ti/drivers/spi/SPILPF3DMA.c",
+    "[DRIVERS]/source/ti/drivers/spi/SPIWFF3DMA.c"
+  ]
+}

@@ -1,0 +1,42 @@
+{
+    tools: [ gcc, llvm ],
+    supportedOS: [ tirtos7, freertos, nortos ],
+    boards: [
+        # all_cc13xx_cc26xx, # The tests has not been fully implemented to support these devices
+        all_cc23x0r5, # Do not enable for Loki Low, no overlapping ADC/DAC pins with IOTH
+        all_cc27xx,
+    ],
+
+    configurations: [
+        'standard',
+        {
+            name: 'tfm_enabled',
+            boards: [all_cc27xx],
+        },
+    ],
+
+    fileLists: {
+        all: [
+            # Test source files
+            { path: "[TEST]/src/adcbuf.syscfg", },
+            { path: "[TEST]/src/testcase_adcbuf_general.c" },
+
+            # Top-level drivers
+            { path: "[DRIVERS]/source/ti/drivers/ADCBuf.c", targetDirectory: drivers },
+        ],
+        ~tfm_enabled: [
+            { path: "[TEST]/src/adcbuf.syscfg" },
+        ],
+        tfm_enabled: [
+            { path: "[TEST]/src/adcbuf_ns.syscfg" },
+        ],
+        # Device-specific drivers below
+        all_cc13xx_cc26xx: [
+            { path: "[DRIVERS]/source/ti/drivers/adcbuf/ADCBufCC26XX.c", targetDirectory: drivers },
+        ],
+        all_lpf3: [
+            { path: "[DRIVERS]/source/ti/drivers/adcbuf/ADCBufLPF3.c", targetDirectory: drivers},
+            { path: "[DRIVERS]/source/ti/drivers/adc/ADCLPF3.c", targetDirectory: drivers},
+        ]
+    },
+}
