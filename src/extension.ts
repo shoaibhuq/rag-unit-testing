@@ -711,7 +711,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         if (!targetUri) {
           vscode.window.showErrorMessage(
-            "No file selected or active editor found. Please right-click a C file or open it."
+            "No file selected or active editor found. Please right-click a C or Python file or open it."
           );
           return;
         }
@@ -741,6 +741,7 @@ export function activate(context: vscode.ExtensionContext) {
           const document = await vscode.workspace.openTextDocument(targetUri);
           const fileContent = document.getText();
           const filePath = document.fileName;
+          const fileExtension = path.extname(filePath).toLowerCase();
 
           // 1. Store/Update context in Weaviate (only if vector DB is available and not disabled)
           if (vectorDBAvailable && !vectorDBDisabled) {
@@ -748,14 +749,13 @@ export function activate(context: vscode.ExtensionContext) {
               {
                 location: vscode.ProgressLocation.Notification,
                 title: "Analyzing function context...",
-                cancellable: false, // Keep false if storeFileContext cannot be cancelled
+                cancellable: false,
               },
               async (progress) => {
                 progress.report({
                   increment: 20,
                   message: "Storing file context in Vector DB...",
                 });
-                // Ensure vectorManager is not null before calling
                 if (vectorManager) {
                   await vectorManager.storeFileContext(filePath, fileContent);
                   progress.report({
@@ -767,307 +767,184 @@ export function activate(context: vscode.ExtensionContext) {
                     increment: 30,
                     message: "Context storage skipped (DB not ready).",
                   });
-                  // Optionally throw an error or handle this case
                   throw new Error("Vector DB context could not be stored.");
                 }
               }
             );
-          } else {
-            console.log(
-              "Skipping vector DB context storage (DB not available or disabled)"
-            );
           }
 
-          // 2. Extract function name based on file type
-          let functionName: string | undefined;
-          const fileExtension = path.extname(filePath).toLowerCase();
-
+          // 2. Extract all functions from the file
+          let parsedFunctions: ParsedFunction[] = [];
+          
           if (fileExtension === '.py') {
-            // For Python files, try to extract function or class name
-            const pythonMatch = fileContent.match(/^\s*(?:def|class)\s+(\w+)\s*\(/m);
-            functionName = pythonMatch ? pythonMatch[1] : undefined;
+            // For Python files, use the Python parser
+            if (pythonParser && (await pythonParser.initialize())) {
+              console.log("Using Python parser to find functions");
+              const parsedFile = pythonParser.parseContent(fileContent, filePath);
+              parsedFunctions = parsedFile.elements
+                .filter((element: PythonCodeElement) => element.type === 'function' || element.type === 'method')
+                .map((element: PythonCodeElement) => ({
+                  functionName: element.name,
+                  content: element.content,
+                  parameters: element.parameters || [],
+                  returnType: element.returnType || '',
+                  className: element.parentClass,
+                  isMethod: element.type === 'method',
+                  decorators: element.decorators
+                }));
+            } else {
+              // Fallback to regex parser for Python
+              console.log("Falling back to regex parser for Python");
+              parsedFunctions = parsePythonFunctions(fileContent);
+            }
           } else {
-            // For C files, use the existing regex
-            const functionMatch = fileContent.match(/^\s*(?:[\w\s\*]+?)\s+(\w+)\s*\(/m);
-            functionName = functionMatch ? functionMatch[1] : undefined;
+            // For C files, use the C parser
+            if (cParser && (await cParser.initialize())) {
+              console.log("Using Tree-sitter parser to find functions");
+              parsedFunctions = cParser.parseFunctions(fileContent, filePath);
+            } else {
+              // Fallback to regex parser for C
+              console.log("Falling back to regex parser for C");
+              parsedFunctions = parseCFunctions(fileContent);
+            }
           }
 
-          if (!functionName || functionName === "main") {
-            functionName = await vscode.window.showInputBox({
-              prompt:
-                "Could not auto-detect function. Enter the function name to test:",
-              placeHolder: fileExtension === '.py' ? "e.g., calculate_sum" : "e.g., calculate_sum",
-              value:
-                functionName && functionName !== "main" ? functionName : "", // Pre-fill if partially detected
-            });
-          }
+          // Filter out 'main' function
+          parsedFunctions = parsedFunctions.filter(f => f.functionName !== 'main');
 
-          if (!functionName) {
-            vscode.window.showErrorMessage(
-              "No function name provided. Aborting test generation."
-            );
+          if (parsedFunctions.length === 0) {
+            vscode.window.showErrorMessage("No functions found in the file to test.");
             return;
           }
 
-          // 3. Find the specific code block for the target function
-          let targetFunction = null;
-          let parsedFunctions = [];
+          // 3. Let user select which functions to test
+          const functionItems = parsedFunctions.map(f => ({
+            label: f.functionName,
+            description: `${f.returnType || 'void'} ${f.functionName}(${f.parameters.join(', ')})`,
+            function: f,
+            picked: true // Default to selected
+          }));
 
-          // Try using appropriate parser based on file type
-          if (fileExtension === '.py' && pythonParser && (await pythonParser.initialize())) {
-            console.log("Using Python parser to find functions");
-            const parsedFile = pythonParser.parseContent(fileContent, filePath);
-            const pythonFunctions: ParsedFunction[] = parsedFile.elements
-              .filter((element: PythonCodeElement) => element.type === 'function')
-              .map((element: PythonCodeElement) => ({
-                functionName: element.name,
-                content: element.content,
-                parameters: [],
-                returnType: ''
-              }));
-            targetFunction = pythonFunctions.find(
-              (f: ParsedFunction) => f.functionName === functionName
-            );
-          } else if (fileExtension.match(/\.(c|h)$/i) && cParser && (await cParser.initialize())) {
-            console.log("Using Tree-sitter parser to find functions");
-            parsedFunctions = cParser.parseFunctions(fileContent, filePath);
-            targetFunction = parsedFunctions.find(
-              (f: ParsedFunction) => f.functionName === functionName
-            );
+          const selectedFunctions = await vscode.window.showQuickPick(functionItems, {
+            placeHolder: "Select functions to generate tests for (use space to toggle)",
+            matchOnDescription: true,
+            canPickMany: true // Enable multi-select
+          });
+
+          if (!selectedFunctions || selectedFunctions.length === 0) {
+            vscode.window.showInformationMessage("No functions selected. Test generation cancelled.");
+            return;
           }
 
-          // Fall back to regex parser if needed
-          if (!targetFunction) {
-            console.log("Falling back to regex parser");
-            if (fileExtension === '.py') {
-              // Use the Python regex parser
-              parsedFunctions = parsePythonFunctions(fileContent);
-            } else if (cParser) {
-              // Use the fallback method from the C parser
-              parsedFunctions = cParser.fallbackParseFunctions(fileContent);
-            } else {
-              // Use the original regex parser as final fallback
-              parsedFunctions = parseCFunctions(fileContent);
-            }
-            targetFunction = parsedFunctions.find(
-              (f: ParsedFunction) => f.functionName === functionName
-            );
-          }
-
-          let functionCode = "";
-
-          if (!targetFunction) {
-            console.warn(
-              `Function '${functionName}' not found in parsed content of ${path.basename(
-                filePath
-              )}.`
-            );
-            vscode.window.showWarningMessage(
-              `Function '${functionName}' could not be found automatically. Continuing with user input.`
-            );
-
-            // Allow user to input function code directly if not found
-            const userProvidedCode = await vscode.window.showInputBox({
-              prompt: `Couldn't locate function '${functionName}'. Please provide a description or signature:`,
-              placeHolder: "void function(int param1, char* param2) {...}",
-              ignoreFocusOut: true,
-              validateInput: (text) => {
-                return text.length > 0
-                  ? null
-                  : "Please enter a function description or click Cancel";
-              },
-            });
-
-            if (!userProvidedCode) {
-              vscode.window.showErrorMessage("Test generation cancelled.");
-              return;
-            }
-
-            functionCode = userProvidedCode;
-          } else {
-            functionCode = targetFunction.content;
-          }
-
-          // Gather context from related files
-          let additionalContext = "";
-          const relatedFiles = await findRelatedCFiles(filePath);
-
-          if (relatedFiles.length > 0) {
-            // Process and store context from related files
-            vscode.window.withProgress(
-              {
-                location: vscode.ProgressLocation.Notification,
-                title: "Processing related files for context...",
-                cancellable: false,
-              },
-              async (progress) => {
-                progress.report({ increment: 0 });
-
-                let processedCount = 0;
-                for (const relatedFile of relatedFiles) {
-                  try {
-                    // Store in vector DB if available
-                    if (
-                      vectorManager &&
-                      vectorManager.isReady() &&
-                      !vectorDBDisabled
-                    ) {
-                      await vectorManager.storeFileContext(
-                        relatedFile.path,
-                        relatedFile.content
-                      );
-                    }
-
-                    // Parse functions to extract for direct context
-                    const fileFunctions = parseCFunctions(relatedFile.content);
-                    if (fileFunctions.length > 0) {
-                      const fileBaseName = path.basename(relatedFile.path);
-                      additionalContext += `\n// Functions from ${fileBaseName}:\n`;
-                      fileFunctions.forEach((f) => {
-                        additionalContext += `\n${f.content}\n`;
-                      });
-                    }
-
-                    processedCount++;
-                    progress.report({
-                      increment: (processedCount / relatedFiles.length) * 100,
-                      message: `Processed ${processedCount}/${relatedFiles.length} files`,
-                    });
-                  } catch (err) {
-                    console.warn(
-                      `Error processing related file ${relatedFile.path}:`,
-                      err
-                    );
-                  }
-                }
-
-                console.log(
-                  `Added ${additionalContext.length} chars of context from related files`
-                );
-              }
-            );
-          }
-
-          // 4. Prepare initial state for LangGraph
-          const initialState: GraphState = {
-            functionName: functionName,
-            functionCode: functionCode,
-            filePath: filePath,
-            language: fileExtension === '.py' ? 'python' : 'c',
-            // If there's additional context and we don't use vector DB, provide it directly
-            similarFunctionsCode: vectorDBAvailable
-              ? undefined
-              : additionalContext,
-            generatedTestCode: undefined,
-            errorMessage: undefined,
-            className: (targetFunction as ParsedFunction)?.className,
-            isMethod: (targetFunction as ParsedFunction)?.isMethod,
-            decorators: (targetFunction as ParsedFunction)?.decorators,
-            parameters: (targetFunction as ParsedFunction)?.parameters,
-            returnType: (targetFunction as ParsedFunction)?.returnType,
-          };
-
-          // 5. Invoke LangGraph workflow with Progress Indicator
-          let cancelled = false; // Flag for cancellation
-
+          // 4. Generate tests for selected functions
+          let allTestCode = '';
+          
+          // Show progress for the selected functions
           await vscode.window.withProgress(
             {
               location: vscode.ProgressLocation.Notification,
-              title: `Generating tests for ${functionName}...`,
-              cancellable: true, // Allow cancellation
+              title: `Generating tests for ${selectedFunctions.length} functions...`,
+              cancellable: true
             },
             async (progress, token) => {
-              progress.report({
-                increment: 0,
-                message: "Starting workflow...",
-              });
-
-              // Cancellation handling setup
               token.onCancellationRequested(() => {
-                console.log("Test generation cancelled by user.");
-                cancelled = true;
-                // Note: LangGraph invoke doesn't have built-in cancellation propagation yet.
-                // The promise will likely still resolve, but we'll check the 'cancelled' flag.
+                vscode.window.showInformationMessage(`Test generation cancelled`);
               });
 
               try {
-                // Invoke the graph
-                const result = await app.invoke(initialState, {
-                  recursionLimit: 10,
-                });
+                // Process each selected function
+                for (let i = 0; i < selectedFunctions.length; i++) {
+                  const functionData = selectedFunctions[i].function;
+                  progress.report({
+                    increment: (100 / selectedFunctions.length),
+                    message: `Processing function ${i+1}/${selectedFunctions.length}: ${functionData.functionName}`
+                  });
 
-                // Check cancellation flag immediately after invoke returns
-                if (cancelled) {
+                  // Create the initial state for this function
+                  const initialState: GraphState = {
+                    functionName: functionData.functionName,
+                    functionCode: functionData.content,
+                    filePath,
+                    language: fileExtension === '.py' ? 'python' : 'c',
+                    parameters: functionData.parameters,
+                    returnType: functionData.returnType,
+                    className: functionData.className,
+                    isMethod: functionData.isMethod,
+                    decorators: functionData.decorators
+                  };
+
+                  // Execute the graph for this function
+                  const result = await app.invoke(initialState);
+
+                  if (result.errorMessage) {
+                    console.error(`Error generating test for ${functionData.functionName}: ${result.errorMessage}`);
+                    continue; // Skip this function but continue with others
+                  }
+
+                  if (!result.generatedTestCode) {
+                    console.error(`No test code generated for ${functionData.functionName}`);
+                    continue; // Skip this function but continue with others
+                  }
+
+                  // Add a separator between function tests
+                  if (allTestCode) {
+                    allTestCode += '\n\n// ===== Tests for next function =====\n\n';
+                  }
+
+                  // Add the test code for this function
+                  allTestCode += result.generatedTestCode;
+                }
+
+                // Create the test file
+                const testFileName = `test_${path.basename(filePath, fileExtension)}.${fileExtension === '.py' ? 'py' : 'c'}`;
+                const testFilePath = path.join(path.dirname(filePath), testFileName);
+
+                // Add debug logging
+                console.log(`Attempting to create test file at: ${testFilePath}`);
+
+                try {
+                  // Ensure the directory exists
+                  await fs.mkdir(path.dirname(testFilePath), { recursive: true });
+                  
+                  // Write the test file with explicit encoding
+                  await fs.writeFile(testFilePath, allTestCode, 'utf8');
+                  
+                  // Verify the file was created
+                  const fileExists = await fs.access(testFilePath)
+                    .then(() => true)
+                    .catch(() => false);
+                    
+                  if (!fileExists) {
+                    throw new Error(`Failed to create test file at ${testFilePath}`);
+                  }
+                  
+                  // Open the test file in the editor
+                  const testFileUri = vscode.Uri.file(testFilePath);
+                  const doc = await vscode.workspace.openTextDocument(testFileUri);
+                  await vscode.window.showTextDocument(doc);
+                  
                   vscode.window.showInformationMessage(
-                    "Test generation cancelled."
+                    `Generated tests for ${selectedFunctions.length} functions in ${testFileName}`
                   );
-                  return; // Exit the progress block
-                }
-
-                // Type-safe way to handle the results
-                // Force typecasting result to any since it has graph-specific properties
-                const apiResult = result as any;
-
-                // Safely extract generatedTestCode
-                const testCode: string | undefined =
-                  apiResult?.generatedTestCode;
-
-                // Check if we have valid test code
-                if (!testCode || typeof testCode !== "string") {
-                  throw new Error(
-                    "Graph execution didn't produce valid test code output"
+                } catch (error: any) {
+                  console.error(`Error writing test file: ${error.message}`);
+                  vscode.window.showErrorMessage(
+                    `Failed to create test file: ${error.message}\nPath: ${testFilePath}`
                   );
                 }
-
-                // We have valid testCode at this point
-                console.log("Test generation complete. Creating test file...");
-
-                // Create and write the test file using extracted test code
-                // Get original filename without extension
-                const originalFilename = path.basename(
-                  targetUri.fsPath,
-                  path.extname(targetUri.fsPath)
-                );
-                const testFileName = `test_${originalFilename}${fileExtension === '.py' ? '.py' : '.c'}`;
-                const testFileUri = vscode.Uri.joinPath(
-                  targetUri,
-                  "..",
-                  testFileName
-                );
-
-                // Buffer.from with string (we know testCode is a string at this point)
-                await fs.writeFile(testFileUri.fsPath, Buffer.from(testCode));
-
-                const doc = await vscode.workspace.openTextDocument(
-                  testFileUri
-                );
-                await vscode.window.showTextDocument(doc);
-
-                vscode.window.showInformationMessage(
-                  `Generated unit test file: ${testFileName}`
-                );
               } catch (error: any) {
-                console.error("Error during LangGraph invocation:", error);
                 vscode.window.showErrorMessage(
-                  `Error generating unit tests: ${error.message}`
+                  `Failed to generate tests: ${error.message}`
                 );
               }
             }
           );
+
         } catch (error: any) {
-          // Catch errors from file operations, graph invocation, etc.
           console.error("Error in generateUnitTest command:", error);
-          // Avoid showing 'Cancelled' as an error message if it was handled
-          if (error.message !== "Cancelled") {
-            const message =
-              error.message.startsWith("Graph execution failed:") ||
-              error.message.includes("LLM generation failed")
-                ? error.message // Show specific graph/LLM errors directly
-                : `Error generating unit test: ${
-                    error.message || "Unknown error"
-                  }`;
-            vscode.window.showErrorMessage(message);
-          }
+          vscode.window.showErrorMessage(
+            `Failed to generate unit tests: ${error.message}`
+          );
         }
       }
     );
