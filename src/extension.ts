@@ -8,6 +8,7 @@ import { SimpleVectorManager } from "./simple-vector"; // Import our simple vect
 import { CParser } from "./c-parser"; // Import our advanced C parser
 import { TITestIntegrator } from "./ti-test-integrator"; // Import TI test integrator
 import { TestCaseValidator } from "./test-validator";
+import { PythonTestGenerator } from "./python-test-generator"; // Import the Python test generator
 
 // Import LangChain and LangGraph components
 import { ChatOpenAI } from "@langchain/openai";
@@ -595,6 +596,7 @@ export function activate(context: vscode.ExtensionContext) {
   let printVectorsDisposable: vscode.Disposable | undefined;
   let generateUnitTestDisposable: vscode.Disposable | undefined;
   let configureDisposable: vscode.Disposable | undefined;
+  let generatePythonTestDisposable: vscode.Disposable | undefined;
 
   // Initialize the vector manager
   const vectorManager = new SimpleVectorManager();
@@ -1081,11 +1083,107 @@ export function activate(context: vscode.ExtensionContext) {
       }
     );
 
+    generatePythonTestDisposable = vscode.commands.registerCommand(
+      "rag-unit-testing.generatePythonTest",
+      async (uri?: vscode.Uri) => {
+        // Allow command palette invocation (uri might be undefined)
+        let targetUri = uri;
+
+        // If command is run from palette, try to get active editor's URI
+        if (!targetUri && vscode.window.activeTextEditor) {
+          targetUri = vscode.window.activeTextEditor.document.uri;
+        }
+
+        if (!targetUri) {
+          vscode.window.showErrorMessage(
+            "No file selected or active editor found. Please right-click a testcase_*.c file."
+          );
+          return;
+        }
+
+        // Ensure it's a testcase_*.c file
+        const fileName = path.basename(targetUri.fsPath);
+        if (!fileName.startsWith("testcase_") || !fileName.endsWith(".c")) {
+          vscode.window.showWarningMessage(
+            "This command only works with testcase_*.c files."
+          );
+          return;
+        }
+
+        try {
+          // Show progress indication
+          await vscode.window.withProgress(
+            {
+              location: vscode.ProgressLocation.Notification,
+              title: "Generating Python test files...",
+              cancellable: true,
+            },
+            async (progress, token) => {
+              progress.report({
+                increment: 0,
+                message: "Analyzing C test file...",
+              });
+
+              // Create Python test generator
+              const pythonTestGenerator = new PythonTestGenerator();
+              
+              // Generate Python test files
+              progress.report({
+                increment: 30,
+                message: "Generating Python test files...",
+              });
+              
+              const pythonFilePath = await pythonTestGenerator.generatePythonTest(targetUri!.fsPath);
+              
+              if (token.isCancellationRequested) {
+                vscode.window.showInformationMessage("Python test generation cancelled.");
+                return;
+              }
+              
+              progress.report({
+                increment: 70,
+                message: "Finalizing test files...",
+              });
+
+              if (pythonFilePath) {
+                // Display the generated Python test file
+                const pythonFileUri = vscode.Uri.file(pythonFilePath);
+                try {
+                  const doc = await vscode.workspace.openTextDocument(pythonFileUri);
+                  await vscode.window.showTextDocument(doc);
+                  
+                  // Show success message
+                  vscode.window.showInformationMessage(
+                    `Successfully generated Python test files for ${fileName}`
+                  );
+                } catch (error: any) {
+                  console.error("Error opening generated test file:", error);
+                  vscode.window.showErrorMessage(
+                    `Error opening generated test file: ${error.message}`
+                  );
+                }
+              } else {
+                vscode.window.showErrorMessage(
+                  "Failed to generate Python test files."
+                );
+              }
+            }
+          );
+        } catch (error: any) {
+          console.error("Error in generatePythonTest command:", error);
+          vscode.window.showErrorMessage(
+            `Error generating Python test: ${error.message || "Unknown error"}`
+          );
+        }
+      }
+    );
+
     // Add disposables to context subscriptions
     if (helloWorldDisposable) context.subscriptions.push(helloWorldDisposable);
     if (printVectorsDisposable) context.subscriptions.push(printVectorsDisposable);
     if (generateUnitTestDisposable) context.subscriptions.push(generateUnitTestDisposable);
     if (configureDisposable) context.subscriptions.push(configureDisposable);
+    if (generatePythonTestDisposable) context.subscriptions.push(generatePythonTestDisposable);
 
   } catch (error: any) {
     console.error("Error setting up LangGraph workflow:", error);
